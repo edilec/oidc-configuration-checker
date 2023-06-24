@@ -1,0 +1,159 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import { CALLBACK, apiReport, client, findingsFor, fixture, policy, raisedRules, uriRow } from './support.mjs'
+
+/**
+ * Redirect policy: exact matching, and the shapes that only make sense without
+ * it.
+ *
+ * The whole reason this tool compares one string against another is that prefix
+ * and pattern matching is how an authorization response is delivered to a host
+ * nobody registered. A checker that mirrored the loose behaviour could not
+ * detect the loose behaviour.
+ */
+
+const withUris = (clientUris, allowedUris) => fixture({
+  client: client({ redirectUris: clientUris }),
+  policy: policy({ allowedRedirectUris: allowedUris }),
+})
+
+test('a registered URI the policy allows exactly is allowlisted', async () => {
+  const report = await apiReport(withUris([CALLBACK], [CALLBACK]))
+
+  assert.equal(report.status, 'pass')
+  assert.equal(uriRow(report, CALLBACK).status, 'allowlisted')
+  assert.equal(report.summary.redirectUris, 1)
+})
+
+test('a URI that differs from the allowlist only by a trailing slash does not match', async () => {
+  const report = await apiReport(withUris([`${CALLBACK}/`], [CALLBACK]))
+
+  assert.deepEqual(raisedRules(report), ['redirect-uri-not-allowlisted', 'redirect-uri-unused'])
+  assert.equal(uriRow(report, `${CALLBACK}/`).status, 'not-allowlisted')
+})
+
+test('a URI that differs only in letter case does not match, and the suggestion says why', async () => {
+  const report = await apiReport(withUris(['https://APP.example.invalid/auth/callback'], [CALLBACK]))
+
+  const finding = findingsFor(report, 'redirect-uri-not-allowlisted')[0]
+  assert.equal(finding.location.pointer, '/redirectUris/0')
+  assert.equal(finding.suggestion.includes('only in letter case'), true)
+})
+
+test('a URI the policy does not list at all names the list it is missing from', async () => {
+  const report = await apiReport(withUris([CALLBACK, 'https://app.example.invalid/legacy'], [CALLBACK]))
+
+  const finding = findingsFor(report, 'redirect-uri-not-allowlisted')[0]
+  assert.equal(finding.location.pointer, '/redirectUris/1')
+  assert.equal(finding.suggestion.includes('allowedRedirectUris'), true)
+  assert.equal(report.status, 'fail')
+})
+
+test('an allowlist entry this client does not use is reported as spare, not as a failure', async () => {
+  const report = await apiReport(withUris([CALLBACK], [CALLBACK, 'https://other.example.invalid/cb']))
+
+  const finding = findingsFor(report, 'redirect-uri-unused')[0]
+  assert.equal(finding.severity, 'info')
+  assert.equal(finding.location.file, 'policy.json')
+  assert.equal(finding.location.pointer, '/allowedRedirectUris/1')
+  assert.equal(report.status, 'pass')
+})
+
+test('a wildcard is refused rather than expanded, and the run is not decided', async () => {
+  const report = await apiReport(withUris([CALLBACK], [CALLBACK, 'https://app.example.invalid/*']))
+
+  const finding = findingsFor(report, 'redirect-uri-wildcard')[0]
+  assert.equal(finding.location.file, 'policy.json')
+  assert.equal(finding.message.includes('refused to guess'), true)
+  assert.equal(report.status, 'incomplete', 'coverage was decided against part of the allowlist, so it was not decided')
+})
+
+test('a policy that declares prefix matching fails, and the lists are still compared exactly', async () => {
+  const report = await apiReport(fixture({ policy: policy({ redirectUriMatching: 'prefix' }) }))
+
+  const finding = findingsFor(report, 'redirect-matching-not-exact')[0]
+  assert.equal(finding.location.pointer, '/redirectUriMatching')
+  assert.equal(report.status, 'fail')
+  assert.equal(uriRow(report, CALLBACK).status, 'allowlisted', 'the exact comparison still happened')
+})
+
+test('a fragment, a userinfo component and an http host are each their own rule', async () => {
+  const cases = [
+    [`${CALLBACK}#done`, 'redirect-uri-fragment'],
+    ['https://user@app.example.invalid/auth/callback', 'redirect-uri-userinfo'],
+    ['http://app.example.invalid/auth/callback', 'redirect-uri-insecure-scheme'],
+  ]
+
+  for (const [uri, ruleId] of cases) {
+    const report = await apiReport(withUris([uri], [uri]))
+    assert.equal(findingsFor(report, ruleId).length, 2, `${ruleId} fires on the client list and on the policy list`)
+    assert.equal(report.status, 'fail', uri)
+  }
+})
+
+test('a loopback redirect URI is accepted, and the localhost spelling is only a warning', async () => {
+  const literal = 'http://127.0.0.1:8765/callback'
+  const accepted = await apiReport(withUris([literal], [literal]))
+  assert.deepEqual(raisedRules(accepted), [])
+  assert.equal(accepted.status, 'pass')
+
+  const named = 'http://localhost:8765/callback'
+  const warned = await apiReport(withUris([named], [named]))
+  assert.deepEqual(raisedRules(warned), ['redirect-uri-loopback-hostname'])
+  assert.equal(warned.status, 'pass')
+})
+
+test('a private-use scheme of the application own reverse-domain name is accepted', async () => {
+  const uri = 'com.example.storefront:/oauth2redirect'
+  const report = await apiReport(withUris([uri], [uri]))
+
+  assert.deepEqual(raisedRules(report), [], 'RFC 8252 section 7.1 registers exactly this shape')
+  assert.equal(report.status, 'pass')
+})
+
+test('a scheme any other application could also claim is not a private-use scheme', async () => {
+  for (const uri of ['myapp:/callback', 'javascript:alert(1)']) {
+    const report = await apiReport(withUris([uri], [uri]))
+    assert.equal(findingsFor(report, 'redirect-uri-insecure-scheme').length, 2, uri)
+  }
+})
+
+test('a repeated URI is counted once and reported once', async () => {
+  const report = await apiReport(withUris([CALLBACK, CALLBACK], [CALLBACK]))
+
+  assert.equal(findingsFor(report, 'redirect-uri-duplicate').length, 1)
+  assert.equal(findingsFor(report, 'redirect-uri-duplicate')[0].location.pointer, '/redirectUris/1')
+  assert.equal(report.summary.redirectUris, 1)
+  assert.equal(report.status, 'fail')
+})
+
+test('a URI that could not be read is refused, never compared, and leaves the run undecided', async () => {
+  const report = await apiReport(withUris([CALLBACK, '/auth/callback'], [CALLBACK]))
+
+  const finding = findingsFor(report, 'redirect-uri-invalid')[0]
+  assert.equal(finding.location.pointer, '/redirectUris/1')
+  assert.equal(finding.message.includes('is not an absolute URI with a scheme'), true)
+  assert.equal(report.status, 'incomplete')
+  assert.equal(report.profile.redirectUris.length, 1, 'a refused URI never enters the compared set')
+})
+
+test('post-logout URIs are compared against their own allowlist', async () => {
+  const report = await apiReport(fixture({
+    client: client({ postLogoutRedirectUris: ['https://app.example.invalid/bye'] }),
+  }))
+
+  assert.equal(findingsFor(report, 'redirect-uri-not-allowlisted')[0].location.pointer, '/postLogoutRedirectUris/0')
+  assert.equal(report.summary.postLogoutUris, 1)
+  assert.deepEqual(report.profile.postLogoutUris, [{ uri: 'https://app.example.invalid/bye', status: 'not-allowlisted' }])
+})
+
+test('a client that registers no redirect URI at all is missing a required field', async () => {
+  const noUris = client()
+  delete noUris.redirectUris
+  const report = await apiReport(fixture({ client: noUris }))
+
+  assert.equal(findingsFor(report, 'client-field-missing').length, 1)
+  assert.equal(report.summary.redirectUris, 0)
+  assert.equal(report.status, 'fail')
+})

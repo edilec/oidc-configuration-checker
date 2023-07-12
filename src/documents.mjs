@@ -360,7 +360,7 @@ export function compileClient(sink, file, value, limits) {
     client[field] = raw
   }
 
-  scalar('clientId', isIdentifier, `an identifier of 1-120 characters from [A-Za-z0-9._:/+=~-]`)
+  scalar('clientId', isIdentifier, 'an identifier of 1-120 characters from [A-Za-z0-9._:/+=~-]')
   scalar('expectedIssuer', (raw) => typeof raw === 'string' && raw.length > 0, 'a string holding the issuer URL this client expects')
   scalar('idTokenSignedResponseAlg', isToken, 'a JWS algorithm name such as RS256')
   scalar('tokenEndpointAuthMethod', isToken, 'an authentication method name such as private_key_jwt')

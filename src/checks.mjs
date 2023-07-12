@@ -356,7 +356,7 @@ function checkRedirects(sink, files, client, policy, budget) {
         file: files.policy,
         pointer: entry.pointer,
         ruleId: 'redirect-uri-unused',
-        message: `The policy allows this redirect URI and this client registers no such URI. A spare entry is reported rather than refused: another client may use it, and this tool reads one client.`,
+        message: 'The policy allows this redirect URI and this client registers no such URI. A spare entry is reported rather than refused: another client may use it, and this tool reads one client.',
         evidence: excerpt(entry.value, 120),
       })
     }

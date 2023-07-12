@@ -97,7 +97,7 @@ test('decoding is the decoder decision, never an inference from decoded text', (
   assert.equal(decodeUtf8(new Uint8Array([0xff, 0xfe, 0xfd])).ok, false)
   // A file that legitimately holds U+FFFD decodes; a tool that hunted for that
   // character in the decoded text would call this one undecodable.
-  assert.equal(decodeUtf8(new TextEncoder().encode('"�"')).ok, true)
+  assert.equal(decodeUtf8(new TextEncoder().encode('"\\ufffd"')).ok, true)
 })
 
 test('isPlainObject refuses arrays, null and anything with another prototype', () => {

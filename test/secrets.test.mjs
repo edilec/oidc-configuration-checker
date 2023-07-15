@@ -5,13 +5,14 @@ import {
   CALLBACK,
   clean,
   client,
-  cliReport,
+  cliRun,
   findingsFor,
   fixture,
   jwks,
   metadata,
   policy,
   rsaKey,
+  withRoot,
 } from './support.mjs'
 
 /**
@@ -47,13 +48,21 @@ function assertNoTrace(streams, canary, label) {
   }
 }
 
-/** Both streams plus the parsed report, as one string to scan. */
+/**
+ * Run the real binary with the human report switched **on**, and return both
+ * streams as one string to scan.
+ *
+ * Deliberately not `--json`: the human report on stderr prints messages,
+ * evidence and summary lines that the JSON report also carries, and a redaction
+ * test that only ever looked at stdout would pass on a leak that reached the
+ * other stream.
+ */
 async function streamsFor(files) {
-  const result = await cliReport(files, [])
-  return {
-    ...result,
-    scanned: `${result.stdout}${result.stderr}`,
-  }
+  const result = await withRoot(files, async (root) => {
+    const run = await cliRun(['--root', root])
+    return { ...run, report: run.stdout === '' ? null : JSON.parse(run.stdout) }
+  })
+  return { ...result, scanned: `${result.stdout}${result.stderr}` }
 }
 
 test('a private key parameter is named, never read, never measured and never echoed', async () => {

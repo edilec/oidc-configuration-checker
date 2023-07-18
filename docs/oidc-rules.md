@@ -250,6 +250,25 @@ Exceeding a limit is never a silent truncation: it produces a finding naming the
 limit and the run is `incomplete`. An unknown limit name is a configuration
 error, not an ignored key.
 
+## Determinism and ordering
+
+Findings are sorted by `location.file`, then `location.pointer`, then `ruleId`,
+then `message`, and every comparison is by UTF-16 code unit. The message is part
+of the key because two rules deliberately anchor more than one finding at the
+same pointer: an offered algorithm the policy does not permit is a relation
+between two documents, so it belongs to the list rather than to one index of it.
+
+Every other ordered value in the report -- the algorithms offered and permitted,
+the redirect URIs, the key set -- is ordered the same way. Nothing in this
+package reads a clock, a locale, an environment variable or a random source, and
+the same four files produce byte-identical stdout every time.
+
+Code-unit ordering is not a detail here. Algorithm names are exactly where it
+and locale collation disagree: by code unit `ES256` precedes `EdDSA` and both
+precede `none`, while an English collator puts `EdDSA` first and `none` in the
+middle. A collated report would list a provider's algorithms differently on a
+different machine.
+
 ## What makes a run incomplete
 
 Any of these, each with its own finding:

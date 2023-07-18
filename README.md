@@ -48,7 +48,10 @@ Two of the four files are **exports you already have**, saved verbatim:
 }
 
 // jwks.json — the key set the provider publishes
-{ "keys": [ { "kty": "RSA", "use": "sig", "kid": "2026-03-signing", "alg": "RS256", "n": "…", "e": "AQAB" } ] }
+{ "keys": [
+  { "kty": "RSA", "use": "sig", "kid": "2026-03-signing", "alg": "RS256", "n": "…", "e": "AQAB" },
+  { "kty": "RSA", "use": "sig", "kid": "2025-09-signing", "alg": "RS256", "n": "…", "e": "AQAB" }
+] }
 ```
 
 Two are **documents this tool defines**:
@@ -237,6 +240,9 @@ surprise:
   `"id_token code"` are different values — because that is how providers match
   them.
 - An unknown key in a document this tool defines refuses that document outright.
+- A key set with nothing usable in it fails even when the client selected `HS*`
+  and needs no key from it. The key set is the provider's, other clients read it,
+  and an unusable one is a misconfiguration whoever is looking.
 
 ## Development
 

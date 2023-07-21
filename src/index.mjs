@@ -31,7 +31,7 @@ import { performance } from 'node:perf_hooks'
 
 import { compileClient, compileJwks, compileMetadata, compilePolicy } from './documents.mjs'
 import { runChecks } from './checks.mjs'
-import { byCodeUnit, decodeUtf8, excerpt, hasForbiddenCharacter, isPlainObject } from './text.mjs'
+import { byCodeUnit, decodeUtf8, excerpt, hasForbiddenCharacter, isPlainObject, parseFailureDetail } from './text.mjs'
 
 export const TOOL_ID = 'oidc-configuration-checker'
 export const REPORT_SCHEMA_VERSION = '1'
@@ -412,7 +412,7 @@ async function loadJson(sink, file, real, limits) {
     sink.add({
       file,
       ruleId: 'input-not-json',
-      message: `${file} is not valid JSON: ${error.message}`,
+      message: `${file} is not valid JSON: ${parseFailureDetail(error)}`,
       suggestion: 'Validate the file with a JSON parser before re-running.',
     })
     return null
@@ -654,6 +654,6 @@ export {
 export {
   EXCERPT_LIMIT, MAX_DESCRIPTION_LENGTH, MAX_IDENTIFIER_LENGTH, MAX_URI_LENGTH, byCodeUnit,
   decodeUtf8, describeValue, excerpt, hasForbiddenCharacter, isBase64Url, isIdentifier,
-  isPlainObject, isResponseType, isToken,
+  isPlainObject, isResponseType, isToken, parseFailureDetail,
 } from './text.mjs'
 export { inspectEndpoint, inspectRedirectUri } from './uri.mjs'

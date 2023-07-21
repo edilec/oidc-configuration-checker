@@ -56,6 +56,12 @@ here.
 - Control (C0), DEL, C1, line/paragraph separator and bidi characters are
   stripped from every untrusted string that reaches output, identifiers and
   object keys included.
+- A JSON parse failure is reported by position, line and column, never by
+  quoting the document. V8 embeds the input in one of its two parse-error
+  shapes (`Unexpected token 'A', "AKIA..." is not valid JSON`), and excerpting
+  does not remove it: the quoted copy carries no control characters and sits at
+  the front of the message. A client document short enough to be only a secret
+  was therefore reproduced in full by `input-not-json`, in the report on stdout.
 - No credential appears in any fixture. Example key sets carry public keys
   generated for this repository with their private halves discarded, and
   redaction is tested against published placeholders on both streams, for every

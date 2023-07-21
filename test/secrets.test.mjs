@@ -14,6 +14,7 @@ import {
   rsaKey,
   withRoot,
 } from './support.mjs'
+import { parseFailureDetail } from '../src/index.mjs'
 
 /**
  * Nothing that looks like a credential reaches either stream.
@@ -159,4 +160,59 @@ test('no fixture in the shipped examples carries a private key parameter', async
       }
     }
   }
+})
+
+test('a document that will not parse is reported by position, never quoted back', async () => {
+  // V8 reports a parse failure two ways and one of them embeds the input:
+  // `Unexpected token 'A', "AKIAIOSFODNN7EXAMPLE" is not valid JSON`. A client
+  // document short enough to be only a secret is therefore reproduced in full
+  // by its own error message -- on exactly the path a malformed or hostile
+  // file takes -- and excerpting does not remove it: the quoted copy carries
+  // no control characters and sits at the front of the message.
+  const { report, scanned } = await streamsFor({ ...clean(), 'client.json': AWS_CANARY })
+
+  const finding = findingsFor(report, 'input-not-json')[0]
+  assert.equal(finding.location.file, 'client.json')
+  assertNoTrace(scanned, AWS_CANARY, 'unparseable client document')
+  assert.equal(finding.message, "client.json is not valid JSON: unexpected token 'A' in the document")
+  assert.equal(report.status, 'incomplete')
+})
+
+test('the same holds for the JSON report on stdout, and the position survives', async () => {
+  const truncated = `{\n  "clientId": "${AWS_CANARY}",\n`
+  const { code, stdout, stderr } = await withRoot(
+    { ...clean(), 'client.json': truncated },
+    (root) => cliRun(['--root', root, '--json']),
+  )
+
+  assert.equal(code, 2)
+  assertNoTrace(`${stdout}${stderr}`, AWS_CANARY, 'truncated client document, --json')
+  const finding = findingsFor(JSON.parse(stdout), 'input-not-json')[0]
+  assert.match(finding.message, /at position \d+ \(line \d+ column \d+\)$/)
+})
+
+test('parseFailureDetail keeps the position and drops the quoted document', () => {
+  const capture = (source) => {
+    try {
+      JSON.parse(source)
+      return null
+    } catch (error) {
+      return error
+    }
+  }
+
+  const quoting = capture(AWS_CANARY)
+  assert.equal(quoting.message.includes(AWS_CANARY), true, 'V8 no longer quotes the input; this guard needs revisiting')
+  assert.equal(parseFailureDetail(quoting), "unexpected token 'A' in the document")
+
+  // A longer document is quoted as a ten-character prefix rather than whole,
+  // which a check for the entire value would miss entirely.
+  const longCanary = `secret-${CARD_CANARY}`
+  const truncatedSnippet = capture(longCanary)
+  assert.equal(truncatedSnippet.message.includes(longCanary.slice(0, 10)), true, 'V8 no longer truncates at ten')
+  assertNoTrace(parseFailureDetail(truncatedSnippet), longCanary, 'ten-character snippet')
+
+  assert.match(parseFailureDetail(capture('{"a": 1, ')), /at position \d+ \(line \d+ column \d+\)$/)
+  assert.equal(parseFailureDetail(capture('')), 'Unexpected end of JSON input')
+  assert.equal(parseFailureDetail(new Error('unrecognised shape')), 'the document could not be parsed as JSON')
 })

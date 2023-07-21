@@ -156,6 +156,13 @@ never *fine*. A key's `status` is `usable`, `not-permitted`, `encryption`,
 | 2 | `incomplete` | Evidence was missing, unsupported or truncated. |
 | 2 | *(no report)* | Invalid configuration. **stdout is empty** — the run never had a subject. |
 
+A refused value is described, never reproduced, and that holds for a whole
+document as well as for a field: an input that will not parse is reported by
+position, line and column (`client.json is not valid JSON: Expected
+double-quoted property name in JSON at position 37 (line 1 column 38)`). V8's
+own parse error quotes the document it choked on, so a file short enough to be
+only a client secret would otherwise be reproduced in full in the report.
+
 The rule catalog, the limits and the supported dialect are in
 [`docs/oidc-rules.md`](./docs/oidc-rules.md).
 

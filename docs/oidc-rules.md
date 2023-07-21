@@ -178,7 +178,7 @@ changelog.
 | `endpoint-invalid` | error | a declared endpoint is not a URL |
 | `endpoint-not-https` | error | a declared endpoint is not `https` |
 | `endpoint-origin-differs` | warning | a declared endpoint is served from another origin than the issuer |
-| `input-not-json` | error | an input did not parse as JSON |
+| `input-not-json` | error | an input did not parse as JSON. The failure is named by position, line and column; the document itself is never quoted back |
 | `input-not-utf8` | error | an input did not decode as UTF-8 |
 | `input-too-large` | error | an input is above `maxFileBytes` |
 | `input-unreadable` | error | an input could not be reached, inspected or read |

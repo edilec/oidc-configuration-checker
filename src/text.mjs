@@ -220,6 +220,36 @@ export function describeValue(value) {
 }
 
 /**
+ * Say why a document would not parse, without reproducing any of it.
+ *
+ * `describeValue` above is the rule for a refused value; this is the same rule
+ * for a refused document, and it exists because V8 breaks it for free. A parse
+ * failure is reported two ways, and one of them quotes the input:
+ * `Unexpected token 'A', "AKIAIOSFODNN7EXAMPLE" is not valid JSON`, or a
+ * ten-character prefix followed by `"..."`. A client document short enough to
+ * be only a secret is therefore reproduced in full by its own error message,
+ * on exactly the error path an untrusted or malformed file takes. `excerpt`
+ * does not help: it strips controls and cuts from the end, while the quoted
+ * copy carries no controls and sits at the front.
+ *
+ * The position, line and column say where parsing stopped without saying what
+ * was there, which is all a reader needs -- the document stays in the file,
+ * where it started. V8 omits the position from the quoting form, so that case
+ * names the offending token alone rather than inventing a location for it;
+ * callers still pass the result through `excerpt`, because that token is one
+ * character of untrusted input and may itself be a control.
+ */
+export function parseFailureDetail(error) {
+  const message = String(error?.message ?? 'could not be parsed')
+  const position = /at position \d+(?: \(line \d+ column \d+\))?/.exec(message)
+  if (position) return message.slice(0, position.index + position[0].length)
+  const token = /^Unexpected token (.+?), ".*?"(?:\.\.\.)? is not valid JSON$/s.exec(message)
+  if (token) return `unexpected token ${token[1]} in the document`
+  if (/^Unexpected end of JSON input$/.test(message)) return message
+  return 'the document could not be parsed as JSON'
+}
+
+/**
  * Decode bytes as UTF-8, strictly.
  *
  * `fatal: true` is the whole point. Decoding leniently and then hunting for

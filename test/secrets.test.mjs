@@ -174,7 +174,7 @@ test('a document that will not parse is reported by position, never quoted back'
   const finding = findingsFor(report, 'input-not-json')[0]
   assert.equal(finding.location.file, 'client.json')
   assertNoTrace(scanned, AWS_CANARY, 'unparseable client document')
-  assert.equal(finding.message, "client.json is not valid JSON: unexpected token 'A' in the document")
+  assert.equal(finding.message, "client.json is not valid JSON: unexpected token 'A' at the start of the document")
   assert.equal(report.status, 'incomplete')
 })
 
@@ -203,7 +203,7 @@ test('parseFailureDetail keeps the position and drops the quoted document', () =
 
   const quoting = capture(AWS_CANARY)
   assert.equal(quoting.message.includes(AWS_CANARY), true, 'V8 no longer quotes the input; this guard needs revisiting')
-  assert.equal(parseFailureDetail(quoting), "unexpected token 'A' in the document")
+  assert.equal(parseFailureDetail(quoting), "unexpected token 'A' at the start of the document")
 
   // A longer document is quoted as a ten-character prefix rather than whole,
   // which a check for the entire value would miss entirely.
@@ -215,4 +215,75 @@ test('parseFailureDetail keeps the position and drops the quoted document', () =
   assert.match(parseFailureDetail(capture('{"a": 1, ')), /at position \d+ \(line \d+ column \d+\)$/)
   assert.equal(parseFailureDetail(capture('')), 'Unexpected end of JSON input')
   assert.equal(parseFailureDetail(new Error('unrecognised shape')), 'the document could not be parsed as JSON')
+})
+
+/**
+ * The trap the first version of this guard walked into: a document whose own
+ * text reads `at position 1`.
+ *
+ * V8 answers it with `Unexpected token 'a', "at position 1" is not valid JSON`,
+ * which carries both spellings at once -- the quoted copy of the document, and,
+ * inside that copy, something that reads exactly like an offset. The guard
+ * looked for the offset first, found the document's own text, sliced the
+ * message there and shipped the quoted span it exists to remove. Measured
+ * before the fix, a `policy.json` holding `AKIAIOSat position 1` put the
+ * seven-character prefix `AKIAIOS` on both streams -- above the six-character
+ * standard this file holds the tool to. The offset is only safe once the
+ * quoting shape has been ruled out, so the quoting shape is recognised first.
+ */
+test('a document whose own text reads "at position 1" is not sliced back out of the message', async () => {
+  const capture = (source) => {
+    try {
+      JSON.parse(source)
+      return null
+    } catch (error) {
+      return error
+    }
+  }
+
+  // Seven characters of the canary is what fits in front of `at position 1`
+  // inside V8's twenty-character quoting window.
+  const leading = AWS_CANARY.slice(0, 7)
+  const planted = capture(`${leading}at position 1`)
+  assert.equal(planted.message.includes(leading), true, 'V8 still quotes the canary, so this test still has a subject')
+  assertNoTrace(parseFailureDetail(planted), leading, 'a document reading like an offset')
+  assert.equal(parseFailureDetail(planted), "unexpected token 'A' at the start of the document")
+
+  // Exactly twenty characters, which is where V8 stops quoting the whole
+  // document and starts quoting a window, so this span holds both a line break
+  // and the offset text. Without the `s` flag the quoting shape does not match
+  // across the break, the offset inside the span matches instead, and the
+  // document comes back out.
+  const wrapped = capture(`${AWS_CANARY.slice(0, 6)}\nat position 1`)
+  assert.equal(wrapped.message.includes('\n'), true, 'the quoted span still carries the newline')
+  assertNoTrace(parseFailureDetail(wrapped), AWS_CANARY.slice(0, 6), 'a quoted span carrying a newline')
+  assert.equal(parseFailureDetail(wrapped), "unexpected token 'A' at the start of the document")
+
+  // A failure reached from inside the document says so rather than claiming
+  // the start, and a long document with a sensitive prefix keeps nothing of it.
+  const inside = parseFailureDetail(capture(`{"issuer": "https://id.example.invalid", "x": ${AWS_CANARY}}`))
+  assertNoTrace(inside, AWS_CANARY, 'a failure inside the document')
+  assert.equal(inside, "unexpected token 'A' inside the document")
+
+  const long = parseFailureDetail(capture(`${AWS_CANARY}${'-'.repeat(4000)}`))
+  assertNoTrace(long, AWS_CANARY, 'a long document with a sensitive prefix')
+  assert.equal(long, "unexpected token 'A' at the start of the document")
+
+  // The safe positional spelling is still reported in full, up to the offset.
+  assert.equal(
+    parseFailureDetail(capture('{"issuer": "https://id.example.invalid" "x": 1}')),
+    "Expected ',' or '}' after property value in JSON at position 40 (line 1 column 41)",
+  )
+})
+
+test('a quoting wording this build has never seen is refused wholesale', () => {
+  // The closing guard, and the only thing between a future V8 wording and the
+  // document it failed on. This message quotes the input and matches no branch;
+  // the offset inside the quoted span is the only thing that does, so without
+  // the guard the span ships.
+  const unseen = { message: `Unexpected token 'A', "${AWS_CANARY} at position 5" is not valid JSON.` }
+  const detail = parseFailureDetail(unseen)
+
+  assertNoTrace(detail, AWS_CANARY, 'an unrecognised wording')
+  assert.equal(detail, 'the document could not be parsed as JSON')
 })

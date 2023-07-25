@@ -219,6 +219,36 @@ export function describeValue(value) {
   return `a ${typeof value}`
 }
 
+/** Said when nothing about the failure can be repeated without repeating the document. */
+const UNPARSEABLE = 'the document could not be parsed as JSON'
+
+/** Where V8 puts the offending offset. Safe: an offset says nothing about content. */
+const PARSE_POSITION = /at position \d+(?: \(line \d+ column \d+\))?/
+
+/**
+ * The spelling that quotes the document back.
+ *
+ * Recognised BEFORE the offset is looked for, and that order is the whole fix.
+ * A document whose own text reads `at position 1` produces
+ * `Unexpected token 'a', "at position 1" is not valid JSON`, so a helper that
+ * matches the offset first finds it INSIDE the quoted span and slices the
+ * document straight back out. The `s` flag matters for the same reason: the
+ * quoted span can contain a newline.
+ */
+const QUOTES_THE_INPUT = /^Unexpected token (.+?), (\.\.\.)?".*"(?:\.\.\.)? is not valid JSON$/s
+
+function describeParseFailure(message) {
+  const quoting = QUOTES_THE_INPUT.exec(message)
+  if (quoting !== null) {
+    const where = quoting[2] === undefined ? 'at the start of the document' : 'inside the document'
+    return `unexpected token ${quoting[1]} ${where}`
+  }
+  const position = PARSE_POSITION.exec(message)
+  if (position !== null) return message.slice(0, position.index + position[0].length)
+  if (message === 'Unexpected end of JSON input') return message
+  return UNPARSEABLE
+}
+
 /**
  * Say why a document would not parse, without reproducing any of it.
  *
@@ -226,7 +256,7 @@ export function describeValue(value) {
  * for a refused document, and it exists because V8 breaks it for free. A parse
  * failure is reported two ways, and one of them quotes the input:
  * `Unexpected token 'A', "AKIAIOSFODNN7EXAMPLE" is not valid JSON`, or a
- * ten-character prefix followed by `"..."`. A client document short enough to
+ * ten-character window followed by `"..."`. A client document short enough to
  * be only a secret is therefore reproduced in full by its own error message,
  * on exactly the error path an untrusted or malformed file takes. `excerpt`
  * does not help: it strips controls and cuts from the end, while the quoted
@@ -234,19 +264,23 @@ export function describeValue(value) {
  *
  * The position, line and column say where parsing stopped without saying what
  * was there, which is all a reader needs -- the document stays in the file,
- * where it started. V8 omits the position from the quoting form, so that case
- * names the offending token alone rather than inventing a location for it;
- * callers still pass the result through `excerpt`, because that token is one
- * character of untrusted input and may itself be a control.
+ * where it started. The quoting form carries no offset of its own, so that
+ * case names the offending token and whether the failure was reached at the
+ * start of the document or inside it, rather than inventing a location.
+ *
+ * The closing guard is deliberate belt and braces, and it is the reason this
+ * function is safe against wordings it has never seen: every V8 parse message
+ * that carries no quoted snippet also carries no double quote at all -- it
+ * quotes JSON punctuation with apostrophes. So a double quote surviving to the
+ * end means a snippet survived, whatever the branch logic above concluded, and
+ * the generic sentence is used instead. Callers still pass the result through
+ * `excerpt`, because the offending token is one character of untrusted input
+ * and may itself be a control.
  */
 export function parseFailureDetail(error) {
-  const message = String(error?.message ?? 'could not be parsed')
-  const position = /at position \d+(?: \(line \d+ column \d+\))?/.exec(message)
-  if (position) return message.slice(0, position.index + position[0].length)
-  const token = /^Unexpected token (.+?), ".*?"(?:\.\.\.)? is not valid JSON$/s.exec(message)
-  if (token) return `unexpected token ${token[1]} in the document`
-  if (/^Unexpected end of JSON input$/.test(message)) return message
-  return 'the document could not be parsed as JSON'
+  const message = String(error?.message ?? '')
+  const detail = describeParseFailure(message)
+  return detail.includes('"') ? UNPARSEABLE : detail
 }
 
 /**

@@ -172,6 +172,7 @@ changelog.
 | `alg-unrecognised` | error | a client setting or policy entry names an algorithm this build does not implement |
 | `auth-method-not-offered` | error | the client authenticates with a method the provider does not list |
 | `auth-method-not-permitted` | error | the client authenticates with a method the policy does not permit |
+| `auth-method-support-unknown` | error | the client declares an authentication method and the provider does not publish `token_endpoint_auth_methods_supported`, so it was not checked against the provider at all |
 | `client-field-missing` | error | a required member of `client.json` is absent |
 | `client-invalid` | error | `client.json` has an unknown key or a member of the wrong shape |
 | `document-invalid` | error | `jwks.json` is not a key set this build reads |

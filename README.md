@@ -199,6 +199,15 @@ deployment.** Nothing was fetched. The metadata and the key set are copies
 somebody saved, and they may be out of date, edited, or from a different
 environment than the one you are asking about.
 
+A control the saved documents carry no evidence about is never part of a pass.
+`token_endpoint_auth_methods_supported` is the case worth naming, because it is
+OPTIONAL in OpenID Connect Discovery: when a provider does not publish it, the
+client's `tokenEndpointAuthMethod` is left out of the checked count, a finding
+says so, and the run is `incomplete`. The specification's default of
+`client_secret_basic` is not read as evidence either way — a provider that omits
+the member may well accept more, so calling the method *unoffered* would be as
+wrong as calling it approved.
+
 ### What this tool cannot do, and will not do
 
 It performs no part of an OpenID Connect flow. It does not fetch the discovery

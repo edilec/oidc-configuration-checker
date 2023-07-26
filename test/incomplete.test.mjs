@@ -143,6 +143,20 @@ test('a run that is incomplete for one reason is still a verdict about everythin
   )
 })
 
+test('a control the provider published no evidence about is incomplete, and exits 2', async () => {
+  // The one optional discovery list the settings checks compare against. An
+  // absent `token_endpoint_auth_methods_supported` used to skip the comparison
+  // silently and leave the run reporting `pass` with the setting still counted
+  // -- evidence never obtained, satisfying a control.
+  const without = metadata()
+  delete without.token_endpoint_auth_methods_supported
+  const { code, report } = await cliReport(fixture({ metadata: without }))
+
+  assert.equal(report.status, 'incomplete')
+  assert.equal(code, 2)
+  assert.deepEqual(raisedRules(report), ['auth-method-support-unknown'])
+})
+
 test('nothing that reached an unknown is counted as usable, checked or satisfied', async () => {
   const report = await apiReport(fixture({
     jwks: jwks([rsaKey('known'), rsaKey('unknown', { alg: 'BS256', n: RSA_2048_NEXT.n }), ecKey('banned')]),

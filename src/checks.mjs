@@ -523,14 +523,44 @@ function checkSettings(sink, files, metadata, client, policy, budget) {
 
   const method = client.tokenEndpointAuthMethod
   if (method !== null) {
-    result.settings += 1
-    if (metadata.lists.authMethods !== null && !metadata.lists.authMethods.includes(method)) {
+    /**
+     * `token_endpoint_auth_methods_supported` is OPTIONAL in OpenID Connect
+     * Discovery, which made it the one list this function compares against that
+     * can legitimately be absent -- and an absent list used to skip the
+     * comparison silently, leaving the setting counted as checked and the run
+     * free to report `pass`. That is the tool's own load-bearing claim broken:
+     * the client's authentication method had not been checked against the
+     * provider at all.
+     *
+     * The specification supplies a default of `client_secret_basic` for the
+     * absent member, and reading it that way would let this report
+     * `auth-method-not-offered` instead. It does not, because that would be a
+     * claim about the provider drawn from a document that says nothing about
+     * it: providers omit the member while supporting more than the default, and
+     * a false "not offered" is as wrong as a false pass. The setting is left
+     * out of the checked count, the run is marked incomplete, and the reader is
+     * told which document would settle it -- the same handling the PKCE check
+     * below gives the same situation.
+     */
+    if (metadata.lists.authMethods === null) {
+      result.unknown = true
       sink.add({
-        file: files.client,
-        pointer: '/tokenEndpointAuthMethod',
-        ruleId: 'auth-method-not-offered',
-        message: `The client authenticates with "${excerpt(method, 40)}" and the provider does not list it in "token_endpoint_auth_methods_supported".`,
+        file: files.metadata,
+        pointer: '/token_endpoint_auth_methods_supported',
+        ruleId: 'auth-method-support-unknown',
+        message: `The client authenticates with "${excerpt(method, 40)}" and the discovery document does not publish "token_endpoint_auth_methods_supported", so this run did not check that method against the provider at all. The member is absent, and absence is not evidence of support; the specification's default of "client_secret_basic" is not read as one either, because a provider that omits the member may well accept more.`,
+        suggestion: 'Publish "token_endpoint_auth_methods_supported" at the provider, or confirm the accepted methods by hand.',
       })
+    } else {
+      result.settings += 1
+      if (!metadata.lists.authMethods.includes(method)) {
+        sink.add({
+          file: files.client,
+          pointer: '/tokenEndpointAuthMethod',
+          ruleId: 'auth-method-not-offered',
+          message: `The client authenticates with "${excerpt(method, 40)}" and the provider does not list it in "token_endpoint_auth_methods_supported".`,
+        })
+      }
     }
     if (policy.allowedTokenEndpointAuthMethods !== null && !policy.allowedTokenEndpointAuthMethods.includes(method)) {
       sink.add({

@@ -100,6 +100,7 @@ export const RULE_SEVERITY = Object.freeze({
   'alg-unrecognised': 'error',
   'auth-method-not-offered': 'error',
   'auth-method-not-permitted': 'error',
+  'auth-method-support-unknown': 'error',
   'client-field-missing': 'error',
   'client-invalid': 'error',
   'document-invalid': 'error',

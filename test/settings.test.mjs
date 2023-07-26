@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   apiReport,
+  clean,
   client,
   findingsFor,
   fixture,
@@ -146,6 +147,56 @@ test('an authentication method is checked against the provider and against the p
 
   assert.deepEqual(raisedRules(report), ['auth-method-not-offered', 'auth-method-not-permitted'])
   assert.equal(report.status, 'fail')
+})
+
+/**
+ * The only discovery list this file compares against that is OPTIONAL in the
+ * specification, and the one that used to be skipped in silence.
+ *
+ * `token_endpoint_auth_methods_supported` absent meant the `!== null` guard
+ * simply declined to compare, the setting stayed counted in
+ * `summary.settings`, no finding was raised, and the run reported `pass` on a
+ * control it had never checked -- the tool's own "unknown is never a pass"
+ * claim, broken by the one list that can legitimately be missing. Deleting the
+ * equally optional `code_challenge_methods_supported` had always failed, which
+ * is what made this one a gap rather than a policy.
+ */
+test('an authentication method the provider never published is not checked, and not a pass', async () => {
+  const without = metadata()
+  delete without.token_endpoint_auth_methods_supported
+  const report = await apiReport(fixture({ metadata: without }))
+
+  assert.deepEqual(raisedRules(report), ['auth-method-support-unknown'])
+  assert.equal(report.status, 'incomplete', 'a control that was not checked is not a pass')
+
+  const finding = findingsFor(report, 'auth-method-support-unknown')[0]
+  assert.equal(finding.location.file, 'metadata.json')
+  assert.equal(finding.location.pointer, '/token_endpoint_auth_methods_supported')
+  assert.equal(finding.message.includes('absence is not evidence of support'), true)
+  assert.equal(finding.message.includes('client_secret_basic'), true, 'and the default is named as one this tool does not read')
+
+  const checked = await apiReport(clean())
+  assert.equal(checked.status, 'pass', 'the same fixture with the list published is the control')
+  assert.equal(
+    report.summary.settings,
+    checked.summary.settings - 1,
+    'the unchecked setting is left out of the checked count, not carried in it',
+  )
+  assert.equal(report.summary.checked, checked.summary.checked - 1)
+})
+
+test('an authentication method the policy forbids is still reported when the provider published no list', async () => {
+  // The two comparisons are independent: the provider's silence says nothing
+  // about the policy's, so the policy check must still run.
+  const without = metadata()
+  delete without.token_endpoint_auth_methods_supported
+  const report = await apiReport(fixture({
+    metadata: without,
+    client: client({ tokenEndpointAuthMethod: 'client_secret_post' }),
+  }))
+
+  assert.deepEqual(raisedRules(report), ['auth-method-not-permitted', 'auth-method-support-unknown'])
+  assert.equal(report.status, 'incomplete')
 })
 
 test('a provider that does not offer S256 fails a policy that requires PKCE', async () => {

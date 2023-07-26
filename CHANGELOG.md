@@ -30,9 +30,19 @@ here.
   against their curve, and a `minimumKeys` floor. A published private or
   symmetric parameter is reported by name and its value is never decoded,
   measured or echoed.
-- A 70-rule catalog with one frozen `ruleId -> severity` table, documented in
+- A 71-rule catalog with one frozen `ruleId -> severity` table, documented in
   `docs/oidc-rules.md` and pinned behaviourally by exit code, error count and
   printed severity word.
+- `auth-method-support-unknown`, for the one discovery list the settings checks
+  compare against that is OPTIONAL in the specification. A provider that does
+  not publish `token_endpoint_auth_methods_supported` leaves the client's
+  authentication method unchecked against the provider; that setting is now left
+  out of the checked count and the run is `incomplete`, where it previously
+  skipped the comparison in silence, kept the setting counted and reported
+  `pass` on a control it had never checked. The specification's default of
+  `client_secret_basic` is deliberately not read as evidence: a provider that
+  omits the member may accept more, so reporting `auth-method-not-offered`
+  would be a false failure rather than a fix.
 - Enforced limits on bytes, keys, redirect URIs, algorithm lists, other lists,
   discovery members, findings and runtime, each reported by name when reached
   and each making the run `incomplete` rather than truncating silently.

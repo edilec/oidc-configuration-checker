@@ -54,7 +54,12 @@ test('every finding carries the fields the report contract requires, and nothing
   for (const finding of await everyFinding()) {
     assert.equal(typeof finding.ruleId, 'string')
     assert.equal(SEVERITIES.includes(finding.severity), true, finding.ruleId)
-    assert.equal(finding.severity, RULE_SEVERITY[finding.ruleId], finding.ruleId)
+    // Deliberately *not* `finding.severity === RULE_SEVERITY[finding.ruleId]`:
+    // `createFinding` assigns the severity straight out of that table, so the
+    // comparison holds by construction for every finding the tool can emit and
+    // cannot fail. What severity actually decides -- the summary counts, the
+    // printed word and the exit code -- is pinned below and in
+    // `test/severity-exit.test.mjs` and `test/severity-word.test.mjs`.
     assert.equal(typeof finding.message, 'string')
     assert.equal(finding.message.length > 0 && finding.message.length <= 403, true, finding.ruleId)
     assert.equal(typeof finding.location.file, 'string')
@@ -86,6 +91,23 @@ test('checked is the sum of the subject counts, in every report', async () => {
     assert.equal(
       summary.checked,
       summary.endpoints + summary.redirectUris + summary.postLogoutUris + summary.keys + summary.settings,
+    )
+  }
+})
+
+test('the summary counts the severities the findings actually carry', async () => {
+  // The falsifiable half of the severity contract at this level: a consumer
+  // reading only `summary.errors` is reading a claim about the findings beside
+  // it, and that claim can be wrong in a way a table compared against itself
+  // never shows.
+  for (const build of CORPUS) {
+    const report = await build()
+    assert.equal(report.summary.errors, report.findings.filter((row) => row.severity === 'error').length)
+    assert.equal(report.summary.warnings, report.findings.filter((row) => row.severity === 'warning').length)
+    assert.equal(
+      report.status === 'fail',
+      report.summary.errors > 0 && report.status !== 'incomplete',
+      'fail is exactly an error-severity finding on a run that finished',
     )
   }
 })

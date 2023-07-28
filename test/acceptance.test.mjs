@@ -132,8 +132,23 @@ test('the documentation says plainly what the tool does not do', async () => {
   const readme = await readFile(join(projectDirectory, 'README.md'), 'utf8')
   const rules = await readFile(join(projectDirectory, 'docs/oidc-rules.md'), 'utf8')
 
-  for (const claim of ['never', 'token', 'flow']) {
-    assert.equal(readme.toLowerCase().includes(claim), true, `README.md does not mention ${claim}`)
+  // The claims themselves, not the words they happen to contain. Asking only
+  // that the README mention "never", "token" and "flow" somewhere in its
+  // lowercase form is satisfied by almost any prose about an OIDC tool -- the
+  // sentence describing the JSON envelope carries all three -- so a README that
+  // had dropped its non-goals entirely would still have passed.
+  // Line wrapping is not the subject, so the prose is compared with its
+  // whitespace flattened; the claim is.
+  const prose = readme.replace(/\s+/g, ' ')
+  for (const claim of [
+    'It performs no part of an OpenID Connect flow.',
+    'It does not fetch the discovery document or the key set',
+    'obtain, decode or verify a token',
+    'Token acquisition and login bypass are outside its scope',
+    'no credential is read from any source',
+    'Nothing was fetched.',
+  ]) {
+    assert.equal(prose.includes(claim), true, `README.md no longer says: ${claim}`)
   }
   assert.equal(readme.includes('Limits and non-goals'), true)
   assert.equal(rules.includes('What this tool does not do'), true)

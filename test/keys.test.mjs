@@ -77,6 +77,35 @@ test('two keys answering to one kid make the rotation undefined', async () => {
   assert.equal(report.status, 'fail')
 })
 
+/**
+ * What "refused" means in a key row, now that nothing counts it separately.
+ *
+ * `checkKeys` used to return a `refused` tally that `runChecks` never read, and
+ * the tally was not even right: a key refused for a duplicate `kid` is marked
+ * after `checkKey` has returned, so it never reached the counter. The rows are
+ * the record -- a refused key is reported, carries `status: "refused"`, and is
+ * outside the usable set -- and that is what this case pins, for both routes
+ * into the status.
+ */
+test('every refused key is reported, carries the status, and is outside the usable set', async () => {
+  const report = await apiReport(withKeys([
+    rsaKey('rotating'),
+    rsaKey('unsigned', { alg: 'none', n: RSA_2048_NEXT.n }),
+    rsaKey('rotating', { n: RSA_1024.n, e: RSA_1024.e }),
+  ]))
+
+  assert.equal(keyRow(report, 'unsigned').status, 'refused', 'refused inside checkKey')
+  assert.equal(report.profile.signingKeys.filter((row) => row.status === 'refused').length, 2, 'and refused after it, for the duplicate kid')
+  assert.equal(report.summary.keys, 3)
+  assert.equal(report.summary.usableKeys, 1)
+  assert.equal(
+    report.profile.signingKeys.filter((row) => row.status === 'usable').length,
+    report.summary.usableKeys,
+    'the usable count is the rows, not a tally kept beside them',
+  )
+  assert.equal(report.status, 'fail')
+})
+
 test('one usable key against a policy that requires two is a rotation nobody can stage', async () => {
   const report = await apiReport(withKeys([rsaKey('only')], { policy: policy({ minimumKeys: 2 }) }))
 

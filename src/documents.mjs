@@ -288,6 +288,22 @@ export function compileMetadata(sink, file, value, limits) {
     endpoints.push({ field: key, value: endpoint })
   }
 
+  /**
+   * The discovery lists this build reads.
+   *
+   * Four of the five have a reader in `src/checks.mjs`;
+   * `subject_types_supported` does not, and that is deliberate rather than an
+   * oversight. It is compiled because compiling it is what *refuses* it: a
+   * member of the wrong shape, an entry that is not a token, or a list above
+   * `maxListEntries` each raise a finding here, and a required member this
+   * build could not read must not pass unremarked. What it has no reader for is
+   * a comparison -- the client document this tool defines declares no subject
+   * type, so there is nothing to compare it against, and inventing a rule about
+   * which subject types a provider ought to offer would be this tool deciding a
+   * deployment question it was not asked. The compiled values sit in `lists`
+   * because the loop is uniform; `lists.subjectTypes` having no reader is the
+   * honest state, not a missing check.
+   */
   const lists = {}
   const LIST_SPECS = [
     { field: 'id_token_signing_alg_values_supported', name: 'idTokenAlgs', shape: isToken, noun: 'algorithm names', limit: limits.maxAlgorithms, limitRule: 'too-many-algorithms', limitName: 'maxAlgorithms' },

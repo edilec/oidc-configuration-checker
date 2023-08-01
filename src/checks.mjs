@@ -655,7 +655,7 @@ function checkKey(sink, file, entry, policy, unknownSink) {
       ruleId: 'jwk-invalid',
       message: `"kty" must be a key type name such as RSA; it is ${describeValue(raw.kty)}.`,
     })
-    return { row, refused: true, unknown: false }
+    return { row, unknown: false }
   }
   row.kty = raw.kty
 
@@ -669,7 +669,7 @@ function checkKey(sink, file, entry, policy, unknownSink) {
     })
     row.status = 'unknown'
     unknownSink.unknown = true
-    return { row, refused: false, unknown: true }
+    return { row, unknown: true }
   }
 
   if (raw.kty === 'oct') {
@@ -684,7 +684,7 @@ function checkKey(sink, file, entry, policy, unknownSink) {
         suggestion: 'Remove the key from the published set and rotate the secret.',
       })
     }
-    return { row, refused: true, unknown: false }
+    return { row, unknown: false }
   }
 
   if (raw.use !== undefined) {
@@ -698,7 +698,7 @@ function checkKey(sink, file, entry, policy, unknownSink) {
       })
     } else if (raw.use === 'enc') {
       row.status = 'encryption'
-      return { row, refused: false, unknown: false }
+      return { row, unknown: false }
     }
   }
 
@@ -712,7 +712,7 @@ function checkKey(sink, file, entry, policy, unknownSink) {
     })
     row.status = 'unknown'
     unknownSink.unknown = true
-    return { row, refused: false, unknown: true }
+    return { row, unknown: true }
   }
 
   if (!isToken(raw.alg)) {
@@ -722,7 +722,7 @@ function checkKey(sink, file, entry, policy, unknownSink) {
       ruleId: 'jwk-invalid',
       message: `"alg" must be an algorithm name such as RS256; it is ${describeValue(raw.alg)}.`,
     })
-    return { row, refused: true, unknown: false }
+    return { row, unknown: false }
   }
   row.alg = raw.alg
 
@@ -735,7 +735,7 @@ function checkKey(sink, file, entry, policy, unknownSink) {
       message: 'This key declares alg "none". A key that signs nothing is not a signing key, and its presence in the set invites a verifier to accept an unsigned token as if this key had produced it.',
       suggestion: 'Remove the entry.',
     })
-    return { row, refused: true, unknown: false }
+    return { row, unknown: false }
   }
   if (classified.kind === 'unrecognised') {
     sink.add({
@@ -747,7 +747,7 @@ function checkKey(sink, file, entry, policy, unknownSink) {
     })
     row.status = 'unknown'
     unknownSink.unknown = true
-    return { row, refused: false, unknown: true }
+    return { row, unknown: true }
   }
 
   if (classified.kty !== raw.kty) {
@@ -815,7 +815,7 @@ function checkKey(sink, file, entry, policy, unknownSink) {
     }
   }
 
-  if (refused) return { row, refused: true, unknown: false }
+  if (refused) return { row, unknown: false }
 
   if (policy.allowedIdTokenSigningAlgs !== null && !policy.allowedIdTokenSigningAlgs.includes(raw.alg)) {
     row.status = 'not-permitted'
@@ -826,11 +826,11 @@ function checkKey(sink, file, entry, policy, unknownSink) {
       message: `This key declares alg "${excerpt(raw.alg, 40)}" and the policy does not permit it, so it was not counted as a key this deployment may rotate to.`,
       suggestion: 'Remove the key, or permit the algorithm deliberately.',
     })
-    return { row, refused: false, unknown: false }
+    return { row, unknown: false }
   }
 
   row.status = 'usable'
-  return { row, refused: false, unknown: false }
+  return { row, unknown: false }
 }
 
 /** The key set as a whole: every key, then rotation readiness. */
@@ -838,13 +838,10 @@ function checkKeys(sink, files, jwks, policy, selected, budget) {
   const rows = []
   const seenKids = new Map()
   const unknownSink = { unknown: false }
-  let refused = 0
 
   for (const entry of jwks.entries) {
     budget.check()
-    const outcome = checkKey(sink, files.jwks, entry, policy, unknownSink)
-    if (outcome.refused) refused += 1
-    const { row } = outcome
+    const { row } = checkKey(sink, files.jwks, entry, policy, unknownSink)
 
     if (row.kid !== null) {
       const first = seenKids.get(row.kid)
@@ -909,7 +906,6 @@ function checkKeys(sink, files, jwks, policy, selected, budget) {
       .map((row) => ({ kid: row.kid, kty: row.kty, alg: row.alg, status: row.status })),
     evaluated,
     usable: usable.length,
-    refused,
     unknown: unknownSink.unknown,
   }
 }

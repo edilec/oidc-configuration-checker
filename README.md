@@ -220,10 +220,11 @@ decode or verify a token, introspect, revoke, register a client, or sign anyone
 in. **Token acquisition and login bypass are outside its scope**, and the
 package contains nothing that could do either: there is no code path that opens
 a socket, no cryptographic verification, and no credential is read from any
-source. `test/no-network.test.mjs` proves this three ways — a module-resolution
-guard that refuses every network builtin while the binary completes a real run,
-a live loopback listener whose address is planted in the input and never
-contacted, and a scan of everything that ships.
+source. `test/no-network.test.mjs` checks this without opening a test socket: a
+module-resolution guard refuses network builtins, global fetch is denied, a
+loopback-looking issuer is compared as local data under both guards, and the
+shipped source is scanned for network and credential capabilities. These are
+offline controls, not a claim about a live provider.
 
 It also cannot tell you:
 

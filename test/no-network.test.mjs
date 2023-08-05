@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { createServer } from 'node:http'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,13 +7,13 @@ import { pathToFileURL } from 'node:url'
 import test from 'node:test'
 import { promisify } from 'node:util'
 
-import { CLI, apiReport, clean, client, fixture, metadata, policy, projectDirectory, withRoot } from './support.mjs'
+import { CLI, clean, client, fixture, metadata, policy, projectDirectory, withRoot } from './support.mjs'
 
 const execFileAsync = promisify(execFile)
 
 /**
- * "It never contacts an issuer and opens no socket", proved rather than
- * asserted.
+ * "It never contacts an issuer and opens no socket", checked without opening
+ * a listener in the test suite either.
  *
  * This is the load-bearing claim of the whole package: the discovery document
  * and the key set are copies somebody saved, and a tool that quietly fetched
@@ -27,9 +26,8 @@ const execFileAsync = promisify(execFile)
  *    a socket, the import would fail and the run would not produce a report. A
  *    control run proves the hook actually fires, because a guard that never
  *    fires proves nothing.
- * 2. A live loopback listener whose address is planted in every URL field of
- *    the input, which then records that nothing ever knocked. Input content is
- *    data; a URL in a discovery document is not an instruction to fetch it.
+ * 2. A URL-bearing fixture run under that guard and a blocked global fetch:
+ *    the issuer is read and compared while both network paths are denied.
  * 3. A scan of the shipped source for the globals and spellings a hook cannot
  *    see -- `fetch`, `eval`, a child process that would open a socket on this
  *    package's behalf, and anything that would read a credential.
@@ -51,11 +49,17 @@ export async function resolve(specifier, context, next) {
 const GUARD_SOURCE = `
 import { register } from 'node:module'
 register('./hook.mjs', import.meta.url)
+globalThis.fetch = async () => { throw new Error('BLOCKED_NETWORK_FETCH') }
 `
 
 const PROBE_SOURCE = `
 import net from 'node:net'
 process.stdout.write(typeof net)
+`
+
+const FETCH_GUARD_PROBE_SOURCE = `
+if (!String(globalThis.fetch).includes('BLOCKED_NETWORK_FETCH')) throw new Error('fetch guard absent')
+process.stdout.write('guarded')
 `
 
 async function withGuard(body) {
@@ -64,6 +68,7 @@ async function withGuard(body) {
     await writeFile(join(directory, 'hook.mjs'), HOOK_SOURCE)
     await writeFile(join(directory, 'guard.mjs'), GUARD_SOURCE)
     await writeFile(join(directory, 'probe.mjs'), PROBE_SOURCE)
+    await writeFile(join(directory, 'fetch-guard-probe.mjs'), FETCH_GUARD_PROBE_SOURCE)
     return await body({ directory, guard: pathToFileURL(join(directory, 'guard.mjs')).href })
   } finally {
     await rm(directory, { recursive: true, force: true })
@@ -88,32 +93,31 @@ test('the binary completes a real run with every network builtin refused at reso
   })
 })
 
-test('a live loopback issuer planted in the input is never contacted', async () => {
-  const seen = { connections: 0, requests: 0 }
-  const server = createServer((request, response) => {
-    seen.requests += 1
-    response.end('{}')
-  })
-  server.on('connection', () => {
-    seen.connections += 1
-  })
-  await new Promise((done) => server.listen(0, '127.0.0.1', done))
-  const { port } = server.address()
-
-  try {
-    const issuer = `http://127.0.0.1:${port}`
-    const report = await apiReport(fixture({
+test('an issuer URL is compared as local data while network imports and fetch are denied', async () => {
+  await withGuard(async ({ directory, guard }) => {
+    const { stdout: guardEvidence } = await execFileAsync(process.execPath, [
+      '--import', guard, join(directory, 'fetch-guard-probe.mjs'),
+    ])
+    assert.equal(guardEvidence, 'guarded')
+    const issuer = 'http://127.0.0.1:9'
+    const files = fixture({
       metadata: metadata({ issuer }),
       client: client({ expectedIssuer: issuer, redirectUris: [`${issuer}/callback`] }),
       policy: policy({ allowedRedirectUris: [`${issuer}/callback`] }),
-    }))
-
-    assert.equal(report.profile.issuerMatches, true, 'the issuer was compared, which means it was read')
-    assert.equal(report.findings.length > 0, true, 'and judged: an http issuer is a finding')
-    assert.deepEqual(seen, { connections: 0, requests: 0 }, 'the listener on that exact port saw nothing at all')
-  } finally {
-    await new Promise((done) => server.close(done))
-  }
+    })
+    const run = await withRoot(files, async (root) => {
+      try {
+        return await execFileAsync(process.execPath, ['--import', guard, CLI, '--root', root, '--json'])
+      } catch (error) {
+        assert.equal(error.code, 1, 'the known http issuer is a real finding, not a usage refusal')
+        return error
+      }
+    })
+    const { stdout } = run
+    const report = JSON.parse(stdout)
+    assert.equal(report.profile.issuerMatches, true, 'the local issuer value reached the comparison')
+    assert.equal(report.findings.some((finding) => finding.ruleId === 'issuer-not-https'), true)
+  })
 })
 
 async function shippedSource() {

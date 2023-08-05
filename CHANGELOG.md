@@ -66,12 +66,25 @@ here.
 - Control (C0), DEL, C1, line/paragraph separator and bidi characters are
   stripped from every untrusted string that reaches output, identifiers and
   object keys included.
-- A JSON parse failure is reported by position, line and column, never by
-  quoting the document. V8 embeds the input in one of its two parse-error
-  shapes (`Unexpected token 'A', "AKIA..." is not valid JSON`), and excerpting
-  does not remove it: the quoted copy carries no control characters and sits at
-  the front of the message. A client document short enough to be only a secret
-  was therefore reproduced in full by `input-not-json`, in the report on stdout.
+- A JSON parse failure is reported by position, line and column, or -- when V8
+  answers with the shape that carries no position -- by the offending token and
+  whether the failure was reached at the start of the document or inside it.
+  Never by quoting the document. V8 embeds the input in one of its two
+  parse-error shapes (`Unexpected token 'A', "AKIA..." is not valid JSON`), and
+  excerpting does not remove it: the quoted copy carries no control characters
+  and sits at the front of the message. A client document short enough to be
+  only a secret was therefore reproduced in full by `input-not-json`, in the
+  report on stdout.
+
+  The first fix was not enough on its own. It looked for `at position N` before
+  it looked for the quoting shape, so a document whose own text reads
+  `at position 1` -- V8 answers it with
+  `Unexpected token 'a', "at position 1" is not valid JSON` -- had the offset
+  found *inside* the quoted copy, and the slice shipped the copy. Measured: a
+  `policy.json` reading `AKIAIOSat position 1` put a seven-character canary
+  prefix on both streams. The quoting shape is now recognised first, matched
+  across a line break, and any detail still carrying a double quote is
+  discarded for the generic sentence.
 - No credential appears in any fixture. Example key sets carry public keys
   generated for this repository with their private halves discarded, and
   redaction is tested against published placeholders on both streams, for every

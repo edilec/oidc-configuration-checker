@@ -32,6 +32,13 @@ import { parseFailureDetail } from '../src/index.mjs'
  * key id AWS documents, `4111111111111111` is the standard test card, and
  * `example.invalid` is reserved by RFC 2606. No fixture in this package carries
  * a real credential or a real private key.
+ *
+ * One path needed saying out loud, because every fixture that plants a canary
+ * in a *field* is valid JSON by construction and therefore never reaches it:
+ * the document that will not parse at all. That is the one place raw file bytes
+ * are handled by something other than this package -- V8 writes them into its
+ * own error message -- so the cases below drive canaries through it directly,
+ * including the shape whose own text reads like a position.
  */
 
 const AWS_CANARY = 'AKIAIOSFODNN7EXAMPLE'

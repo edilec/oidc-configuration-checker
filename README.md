@@ -161,7 +161,11 @@ document as well as for a field: an input that will not parse is reported by
 position, line and column (`client.json is not valid JSON: Expected
 double-quoted property name in JSON at position 37 (line 1 column 38)`). V8's
 own parse error quotes the document it choked on, so a file short enough to be
-only a client secret would otherwise be reproduced in full in the report.
+only a client secret would otherwise be reproduced in full in the report. When
+V8 answers with the quoting shape it supplies no position of its own, and the
+report then names the offending token and whether the failure was reached at
+the start of the document or inside it — never a location invented for it, and
+never the text at one.
 
 The rule catalog, the limits and the supported dialect are in
 [`docs/oidc-rules.md`](./docs/oidc-rules.md).

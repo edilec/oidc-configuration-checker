@@ -58,7 +58,12 @@ process.stdout.write(typeof net)
 `
 
 const FETCH_GUARD_PROBE_SOURCE = `
-if (!String(globalThis.fetch).includes('BLOCKED_NETWORK_FETCH')) throw new Error('fetch guard absent')
+try {
+  await fetch('data:text/plain,probe')
+  throw new Error('fetch guard absent')
+} catch (error) {
+  if (error.message !== 'BLOCKED_NETWORK_FETCH') throw error
+}
 process.stdout.write('guarded')
 `
 

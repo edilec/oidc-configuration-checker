@@ -79,6 +79,25 @@ const NOTE_RULES = Object.freeze({
   },
 })
 
+/** Distinguish exact strings whose bounded, safe excerpts happen to collide. */
+function firstRawDifference(left, right, leftName, rightName) {
+  let offset = 0
+  while (offset < left.length && offset < right.length && left.charCodeAt(offset) === right.charCodeAt(offset)) offset += 1
+  const unit = (value) => offset === value.length
+    ? 'end'
+    : `U+${value.charCodeAt(offset).toString(16).toUpperCase().padStart(4, '0')}`
+  return `raw UTF-16 offset ${offset}: ${leftName} ${unit(left)} vs ${rightName} ${unit(right)}`
+}
+
+function issuerEvidence(provider, expected) {
+  const providerLabel = excerpt(provider, 60)
+  const clientLabel = excerpt(expected, 60)
+  const base = `provider ${providerLabel} vs client ${clientLabel}`
+  return providerLabel === clientLabel
+    ? `provider/client ${providerLabel}; ${firstRawDifference(provider, expected, 'provider', 'client')}`
+    : base
+}
+
 /**
  * Compare the issuer the provider declares with the issuer the client expects.
  *
@@ -153,7 +172,7 @@ function checkIssuer(sink, files, metadata, client) {
       pointer: '/expectedIssuer',
       ruleId: 'issuer-trailing-slash',
       message: 'The client expects an issuer that differs from the one the provider declares only by a trailing slash. The "iss" claim is compared exactly, so this configuration rejects every token the provider issues -- or accepts tokens it should not, depending on which side is normalised.',
-      evidence: `provider ${excerpt(result.issuer, 60)} vs client ${excerpt(result.expectedIssuer, 60)}`,
+      evidence: issuerEvidence(result.issuer, result.expectedIssuer),
       suggestion: 'Copy the issuer out of the discovery document verbatim.',
     })
     return result
@@ -164,7 +183,7 @@ function checkIssuer(sink, files, metadata, client) {
     pointer: '/expectedIssuer',
     ruleId: 'issuer-mismatch',
     message: 'The client expects a different issuer from the one this discovery document declares. A client pointed at one provider while trusting another will accept an ID token that was never about it.',
-    evidence: `provider ${excerpt(result.issuer, 60)} vs client ${excerpt(result.expectedIssuer, 60)}`,
+    evidence: issuerEvidence(result.issuer, result.expectedIssuer),
     suggestion: 'Point the client at the provider whose discovery document this is, or fetch the discovery document of the issuer the client expects.',
   })
   return result

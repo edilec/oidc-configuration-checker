@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { ISSUER, apiReport, clean, client, findingsFor, fixture, metadata, raisedRules } from './support.mjs'
+import { ISSUER, apiReport, clean, cliReport, client, findingsFor, fixture, metadata, raisedRules } from './support.mjs'
 
 /**
  * Issuer alignment: the confused-deputy check.
@@ -29,6 +29,34 @@ test('an issuer the client does not expect is reported against the client', asyn
   assert.equal(finding.location.pointer, '/expectedIssuer')
   assert.equal(finding.evidence, 'provider https://login.example.invalid vs client https://id.example.invalid')
   assert.equal(report.profile.issuerMatches, false)
+})
+
+test('long issuer mismatch evidence identifies the first raw UTF-16 difference in both directions', async () => {
+  const left = `${ISSUER}/${'a'.repeat(70)}X`
+  const right = `${ISSUER}/${'a'.repeat(70)}Y`
+  const control = await cliReport(fixture({ metadata: metadata({ issuer: left }), client: client({ expectedIssuer: left }) }))
+  assert.equal(control.code, 0)
+  assert.equal(control.report.status, 'pass')
+  assert.equal(control.report.profile.issuerMatches, true)
+
+  for (const [provider, expected, providerUnit, clientUnit] of [
+    [left, right, 'U+0058', 'U+0059'],
+    [right, left, 'U+0059', 'U+0058'],
+  ]) {
+    const { code, report } = await cliReport(fixture({
+      metadata: metadata({ issuer: provider }),
+      client: client({ expectedIssuer: expected }),
+    }))
+    assert.equal(code, 1)
+    assert.equal(report.status, 'fail')
+    assert.equal(report.profile.issuerMatches, false)
+    const finding = findingsFor(report, 'issuer-mismatch')[0]
+    assert.equal(finding.location.pointer, '/expectedIssuer')
+    assert.equal(
+      finding.evidence.includes(`raw UTF-16 offset ${left.length - 1}: provider ${providerUnit} vs client ${clientUnit}`),
+      true,
+    )
+  }
 })
 
 test('a difference of one trailing slash is reported as itself, not as a mismatch', async () => {

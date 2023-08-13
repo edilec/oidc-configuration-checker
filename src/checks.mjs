@@ -21,6 +21,8 @@
  *   loose behaviour cannot detect it.
  */
 
+import { createHash } from 'node:crypto'
+
 import {
   KEY_TYPES,
   KEY_USES,
@@ -307,7 +309,7 @@ function readUriList(sink, file, field, raw, budget) {
  * the suggestion says so, because the reader needs to know which of the two
  * documents to correct.
  */
-function compareUriList(sink, files, field, policyField, entries, allowlist, used) {
+function compareUriList(sink, files, field, policyField, entries, allowedEntries, allowlist, used) {
   const folded = new Map()
   for (const allowed of allowlist) folded.set(allowed.toLowerCase(), allowed)
 
@@ -319,12 +321,15 @@ function compareUriList(sink, files, field, policyField, entries, allowlist, use
     }
     entry.status = 'not-allowlisted'
     const near = folded.get(entry.value.toLowerCase())
+    const sameExcerpt = allowedEntries.find((allowed) => excerpt(allowed.value, 120) === excerpt(entry.value, 120))
     sink.add({
       file: files.client,
       pointer: entry.pointer,
       ruleId: 'redirect-uri-not-allowlisted',
       message: `This redirect URI is not in the policy's "${policyField}" list. It is compared as one exact string against another, which is what stops a registration from covering a host the deployment never approved.`,
-      evidence: excerpt(entry.value, 120),
+      evidence: sameExcerpt === undefined
+        ? excerpt(entry.value, 120)
+        : `client/policy ${excerpt(entry.value, 50)}; ${firstRawDifference(entry.value, sameExcerpt.value, 'client', 'policy')}`,
       suggestion: near === undefined
         ? `Add the URI to "${policyField}", or remove it from "${field}".`
         : 'The policy lists a URI that differs from this one only in letter case; an exact-match policy treats the two as different. Make them identical.',
@@ -367,22 +372,31 @@ function checkRedirects(sink, files, client, policy, budget) {
 
     const allowlist = new Set(policySide.usable.map((entry) => entry.value))
     const used = new Set()
-    compareUriList(sink, files, spec.field, spec.policyField, clientSide.usable, allowlist, used)
+    compareUriList(sink, files, spec.field, spec.policyField, clientSide.usable, policySide.usable, allowlist, used)
 
     for (const entry of policySide.usable) {
       if (used.has(entry.value)) continue
+      const sameExcerpt = clientSide.usable.find((clientEntry) => excerpt(clientEntry.value, 120) === excerpt(entry.value, 120))
       sink.add({
         file: files.policy,
         pointer: entry.pointer,
         ruleId: 'redirect-uri-unused',
         message: 'The policy allows this redirect URI and this client registers no such URI. A spare entry is reported rather than refused: another client may use it, and this tool reads one client.',
-        evidence: excerpt(entry.value, 120),
+        evidence: sameExcerpt === undefined
+          ? excerpt(entry.value, 120)
+          : `policy/client ${excerpt(entry.value, 50)}; ${firstRawDifference(entry.value, sameExcerpt.value, 'policy', 'client')}`,
       })
     }
 
     result.counts[spec.key] = clientSide.usable.length
     result[spec.key] = clientSide.usable
-      .map((entry) => ({ uri: excerpt(entry.value, 200), status: entry.status }))
+      .map((entry) => ({
+        uri: excerpt(entry.value, 200),
+        status: entry.status,
+        ...(entry.value.length > 200
+          ? { rawSha256: createHash('sha256').update(entry.value, 'utf16le').digest('hex') }
+          : {}),
+      }))
       .sort((left, right) => byCodeUnit(left.uri, right.uri))
   }
 

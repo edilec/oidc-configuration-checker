@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { CALLBACK, apiReport, client, findingsFor, fixture, policy, raisedRules, uriRow } from './support.mjs'
+import { CALLBACK, apiReport, cliReport, client, findingsFor, fixture, policy, raisedRules, uriRow } from './support.mjs'
 
 /**
  * Redirect policy: exact matching, and the shapes that only make sense without
@@ -31,6 +31,49 @@ test('a URI that differs from the allowlist only by a trailing slash does not ma
 
   assert.deepEqual(raisedRules(report), ['redirect-uri-not-allowlisted', 'redirect-uri-unused'])
   assert.equal(uriRow(report, `${CALLBACK}/`).status, 'not-allowlisted')
+})
+
+test('long redirect collision evidence and profile identity distinguish exact values in both directions', async () => {
+  const left = `https://app.example.invalid/${'a'.repeat(205)}X`
+  const right = `https://app.example.invalid/${'a'.repeat(205)}Y`
+  const control = await cliReport(withUris([left], [left]))
+  assert.equal(control.code, 0)
+  assert.equal(control.report.status, 'pass')
+  assert.equal(control.report.profile.redirectUris[0].status, 'allowlisted')
+  assert.match(control.report.profile.redirectUris[0].rawSha256, /^[a-f0-9]{64}$/)
+
+  for (const [registered, allowed, registeredUnit, allowedUnit] of [
+    [left, right, 'U+0058', 'U+0059'],
+    [right, left, 'U+0059', 'U+0058'],
+  ]) {
+    const { code, report } = await cliReport(withUris([registered], [allowed]))
+    assert.equal(code, 1)
+    assert.equal(report.status, 'fail')
+    const denied = findingsFor(report, 'redirect-uri-not-allowlisted')[0]
+    const unused = findingsFor(report, 'redirect-uri-unused')[0]
+    assert.equal(denied.location.pointer, '/redirectUris/0')
+    assert.equal(unused.location.pointer, '/allowedRedirectUris/0')
+    assert.equal(denied.evidence.includes(`raw UTF-16 offset ${left.length - 1}: client ${registeredUnit} vs policy ${allowedUnit}`), true)
+    assert.equal(unused.evidence.includes(`raw UTF-16 offset ${left.length - 1}: policy ${allowedUnit} vs client ${registeredUnit}`), true)
+    assert.match(report.profile.redirectUris[0].rawSha256, /^[a-f0-9]{64}$/)
+    if (registered === left) assert.equal(report.profile.redirectUris[0].rawSha256, control.report.profile.redirectUris[0].rawSha256)
+    else assert.notEqual(report.profile.redirectUris[0].rawSha256, control.report.profile.redirectUris[0].rawSha256)
+  }
+})
+
+test('the profile URI identity marker starts only beyond the 200-unit display bound', async () => {
+  const prefix = 'https://app.example.invalid/'
+  const atBound = `${prefix}${'a'.repeat(200 - prefix.length)}`
+  const overBound = `${atBound}X`
+  const exact = await apiReport(withUris([atBound], [atBound]))
+  const truncated = await apiReport(withUris([overBound], [overBound]))
+  assert.equal(atBound.length, 200)
+  assert.equal(exact.status, 'pass')
+  assert.equal(truncated.status, 'pass')
+  assert.equal(exact.profile.redirectUris[0].uri, atBound)
+  assert.equal(Object.hasOwn(exact.profile.redirectUris[0], 'rawSha256'), false)
+  assert.equal(truncated.profile.redirectUris[0].uri.endsWith('...'), true)
+  assert.match(truncated.profile.redirectUris[0].rawSha256, /^[a-f0-9]{64}$/)
 })
 
 test('a URI that differs only in letter case does not match, and the suggestion says why', async () => {

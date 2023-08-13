@@ -148,6 +148,12 @@ measured or echoed. `minimumKeys` says how many usable keys a rotation needs.
 `issuerMatches` is `true`, `false` or `null` — and `null` means *not compared*,
 never *fine*. A key's `status` is `usable`, `not-permitted`, `encryption`,
 `refused` or `unknown`, and only `usable` counts toward a rotation.
+Long redirect URIs are displayed as bounded excerpts. Their profile rows also
+carry `rawSha256`, a SHA-256 digest of the exact UTF-16 code units compared,
+encoded as UTF-16LE. This identifies distinct long values whose excerpts look
+the same; it is not a credential or a live-provider check. When two rendered
+URI excerpts collide, the findings name the first differing raw UTF-16 offset
+and units without echoing the omitted URI text.
 
 | Exit | Status | Meaning |
 | ---: | --- | --- |

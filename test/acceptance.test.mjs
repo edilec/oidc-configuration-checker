@@ -114,8 +114,14 @@ test('nothing that ships could acquire a token, verify one, or perform any part 
   }
   const source = parts.join('\n')
 
+  assert.deepEqual(
+    source.split('\n').filter((line) => line.includes('node:crypto')),
+    ["import { createHash } from 'node:crypto'"],
+    'the only cryptographic capability shipped is a hash for bounded URI identity labels',
+  )
+
   for (const verb of [
-    'node:crypto', 'createVerify', 'createHmac', 'importKey', 'crypto.subtle', 'jwtVerify', 'decodeJwt',
+    'createVerify', 'createHmac', 'importKey', 'crypto.subtle', 'jwtVerify', 'decodeJwt',
     'grant_type=', 'client_assertion', 'code_verifier', 'access_token=', 'refresh_token=',
     'Authorization:', 'Bearer ', 'set-cookie', 'Set-Cookie',
   ]) {

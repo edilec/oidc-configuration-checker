@@ -171,7 +171,7 @@ test('the only other builtins the package imports are the ones it declares', asy
 
   assert.deepEqual(
     [...new Set(imports)].sort(),
-    ['node:buffer', 'node:fs/promises', 'node:path', 'node:perf_hooks', 'node:process'],
+    ['node:buffer', 'node:crypto', 'node:fs/promises', 'node:path', 'node:perf_hooks', 'node:process'],
   )
 })
 

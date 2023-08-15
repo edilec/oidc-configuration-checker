@@ -234,9 +234,9 @@ function checkEndpoints(sink, files, metadata, issuerOrigin, budget) {
  * Read one list of redirect URIs into the set that is compared exactly.
  *
  * A refused entry never enters the set. It is reported, it is counted, and the
- * caller marks the run incomplete: an exact-match relation computed over part
- * of a list is not the relation the documents describe, and reporting it as one
- * would be a conclusion drawn from evidence that was never obtained.
+ * caller marks the run incomplete and withholds absence claims: an exact-match
+ * relation computed over part of a list is not the relation the documents
+ * describe.
  */
 function readUriList(sink, file, field, raw, budget) {
   const usable = []
@@ -302,14 +302,11 @@ function readUriList(sink, file, field, raw, budget) {
 /**
  * Compare one client list against one policy allowlist, exactly.
  *
- * `allowlist` is a `Set` of strings and membership is `===`. No normalisation
- * happens anywhere in here: a trailing slash, a differing host case or a
- * differing percent-encoding is a mismatch, and that is the point of an
- * exact-match policy. Where a case-insensitive comparison *would* have matched,
- * the suggestion says so, because the reader needs to know which of the two
- * documents to correct.
+ * `allowlist` is a `Set` of strings and membership is `===`. A known match is
+ * still known if another entry was refused, but absence is not known until
+ * both lists are complete. No normalisation happens anywhere in here.
  */
-function compareUriList(sink, files, field, policyField, entries, allowedEntries, allowlist, used) {
+function compareUriList(sink, files, field, policyField, entries, allowedEntries, allowlist, used, relationComplete) {
   const folded = new Map()
   for (const allowed of allowlist) folded.set(allowed.toLowerCase(), allowed)
 
@@ -317,6 +314,10 @@ function compareUriList(sink, files, field, policyField, entries, allowedEntries
     if (allowlist.has(entry.value)) {
       used.add(entry.value)
       entry.status = 'allowlisted'
+      continue
+    }
+    if (!relationComplete) {
+      entry.status = 'unknown'
       continue
     }
     entry.status = 'not-allowlisted'
@@ -351,7 +352,7 @@ function checkRedirects(sink, files, client, policy, budget) {
       file: files.policy,
       pointer: '/redirectUriMatching',
       ruleId: 'redirect-matching-not-exact',
-      message: `The policy declares "${excerpt(policy.redirectUriMatching, 40)}" matching. This tool implements exact matching only, and compared the lists exactly anyway: prefix and pattern matching are how an authorization response is delivered to a host nobody registered.`,
+      message: `The policy declares "${excerpt(policy.redirectUriMatching, 40)}" matching. This tool implements exact matching only; it recognizes known exact matches and does not infer absence from a partial list. Prefix and pattern matching can deliver an authorization response to a host nobody registered.`,
       suggestion: 'Set "redirectUriMatching" to "exact" and list every URI in full.',
     })
   }
@@ -369,23 +370,26 @@ function checkRedirects(sink, files, client, policy, budget) {
     const clientSide = readUriList(sink, files.client, spec.field, declared, budget)
     const policySide = readUriList(sink, files.policy, spec.policyField, allowed, budget)
     result.refused += clientSide.refused + policySide.refused
+    const relationComplete = clientSide.refused === 0 && policySide.refused === 0
 
     const allowlist = new Set(policySide.usable.map((entry) => entry.value))
     const used = new Set()
-    compareUriList(sink, files, spec.field, spec.policyField, clientSide.usable, policySide.usable, allowlist, used)
+    compareUriList(sink, files, spec.field, spec.policyField, clientSide.usable, policySide.usable, allowlist, used, relationComplete)
 
-    for (const entry of policySide.usable) {
-      if (used.has(entry.value)) continue
-      const sameExcerpt = clientSide.usable.find((clientEntry) => excerpt(clientEntry.value, 120) === excerpt(entry.value, 120))
-      sink.add({
-        file: files.policy,
-        pointer: entry.pointer,
-        ruleId: 'redirect-uri-unused',
-        message: 'The policy allows this redirect URI and this client registers no such URI. A spare entry is reported rather than refused: another client may use it, and this tool reads one client.',
-        evidence: sameExcerpt === undefined
-          ? excerpt(entry.value, 120)
-          : `policy/client ${excerpt(entry.value, 50)}; ${firstRawDifference(entry.value, sameExcerpt.value, 'policy', 'client')}`,
-      })
+    if (relationComplete) {
+      for (const entry of policySide.usable) {
+        if (used.has(entry.value)) continue
+        const sameExcerpt = clientSide.usable.find((clientEntry) => excerpt(clientEntry.value, 120) === excerpt(entry.value, 120))
+        sink.add({
+          file: files.policy,
+          pointer: entry.pointer,
+          ruleId: 'redirect-uri-unused',
+          message: 'The policy allows this redirect URI and this client registers no such URI. A spare entry is reported rather than refused: another client may use it, and this tool reads one client.',
+          evidence: sameExcerpt === undefined
+            ? excerpt(entry.value, 120)
+            : `policy/client ${excerpt(entry.value, 50)}; ${firstRawDifference(entry.value, sameExcerpt.value, 'policy', 'client')}`,
+        })
+      }
     }
 
     result.counts[spec.key] = clientSide.usable.length

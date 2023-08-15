@@ -112,6 +112,36 @@ test('a wildcard is refused rather than expanded, and the run is not decided', a
   assert.equal(report.status, 'incomplete', 'coverage was decided against part of the allowlist, so it was not decided')
 })
 
+test('partial client or policy redirect lists never assert absence from a reduced index', async () => {
+  const registered = 'https://app.example.invalid/a'
+  const allowed = 'https://app.example.invalid/b'
+  const complete = await cliReport(withUris([registered], [allowed]))
+  assert.equal(complete.code, 1)
+  assert.equal(complete.report.status, 'fail')
+  assert.deepEqual(
+    complete.report.findings.filter((finding) => finding.ruleId.startsWith('redirect-uri-')).map((finding) => finding.ruleId),
+    ['redirect-uri-not-allowlisted', 'redirect-uri-unused'],
+  )
+
+  for (const missing of ['https://app.example.invalid/*', '/relative']) {
+    for (const side of ['client', 'policy']) {
+      const clientUris = side === 'client' ? [registered, missing] : [registered]
+      const policyUris = side === 'policy' ? [allowed, missing] : [allowed]
+      const { code, report } = await cliReport(withUris(clientUris, policyUris))
+      assert.equal(code, 2, `${side}: missing evidence is incomplete`)
+      assert.equal(report.status, 'incomplete')
+      assert.equal(findingsFor(report, missing.includes('*') ? 'redirect-uri-wildcard' : 'redirect-uri-invalid').length, 1)
+      assert.equal(findingsFor(report, 'redirect-uri-not-allowlisted').length, 0, `${side}: no policy absence claim`)
+      assert.equal(findingsFor(report, 'redirect-uri-unused').length, 0, `${side}: no client absence claim`)
+      assert.equal(report.profile.redirectUris[0].status, 'unknown')
+    }
+  }
+
+  const present = await cliReport(withUris([registered], [registered, 'https://app.example.invalid/*']))
+  assert.equal(present.code, 2)
+  assert.equal(present.report.profile.redirectUris[0].status, 'allowlisted', 'a known exact presence remains known')
+})
+
 test('a policy that declares prefix matching fails, and the lists are still compared exactly', async () => {
   const report = await apiReport(fixture({ policy: policy({ redirectUriMatching: 'prefix' }) }))
 

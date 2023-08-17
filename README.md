@@ -107,6 +107,9 @@ rather than expanded and the run becomes `incomplete`. Fragments, userinfo
 components and non-loopback `http` are each their own rule; RFC 8252 loopback
 and private-use schemes are accepted, because a check that rejects legitimate
 configuration is a defect too.
+Issuer and redirect identities carrying a default-ignorable Unicode mark are
+refused as incomplete evidence: the raw value can differ while appearing
+unchanged in a report. The mark is not echoed in JSON or human output.
 
 **Algorithms.** `none` is refused wherever it appears — offered by the provider,
 selected by the client, or permitted by the policy. **A policy that permits

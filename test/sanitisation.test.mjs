@@ -84,6 +84,68 @@ test('a forbidden character arriving through a redirect URI refuses the URI outr
   }
 })
 
+test('default-ignorable marks cannot create a passing invisible redirect or issuer identity', async () => {
+  const plainRedirect = 'https://app.example.invalid/cb'
+  const plainIssuer = 'https://id.example.invalid/tenant'
+  const redirectControl = await cliReport(fixture({
+    client: client({ redirectUris: [plainRedirect] }),
+    policy: policy({ allowedRedirectUris: [plainRedirect] }),
+  }))
+  const issuerControl = await cliReport(fixture({
+    metadata: metadata({ issuer: plainIssuer }),
+    client: client({ expectedIssuer: plainIssuer }),
+  }))
+  assert.equal(redirectControl.code, 0)
+  assert.equal(redirectControl.report.status, 'pass')
+  assert.equal(issuerControl.code, 0)
+  assert.equal(issuerControl.report.profile.issuerMatches, true)
+
+  for (const point of [0x034f, 0x200b, 0xfe0f]) {
+    const mark = String.fromCharCode(point)
+    const redirect = `https://app.example.invalid/c${mark}b`
+    const redirectRun = await cliReport(fixture({
+      client: client({ redirectUris: [redirect] }),
+      policy: policy({ allowedRedirectUris: [redirect] }),
+    }))
+    assert.equal(redirectRun.code, 2, `U+${point.toString(16)} redirect`)
+    assert.equal(redirectRun.report.status, 'incomplete')
+    assert.equal(findingsFor(redirectRun.report, 'redirect-uri-invalid').length, 2)
+    assert.equal(redirectRun.stdout.includes(mark), false)
+
+    const issuer = `https://id.example.invalid/te${mark}nant`
+    const issuerRun = await cliReport(fixture({
+      metadata: metadata({ issuer }),
+      client: client({ expectedIssuer: issuer }),
+    }))
+    assert.equal(issuerRun.code, 2, `U+${point.toString(16)} issuer`)
+    assert.equal(issuerRun.report.status, 'incomplete')
+    assert.equal(issuerRun.report.profile.issuerMatches, null)
+    assert.equal(issuerRun.stdout.includes(mark), false)
+
+    for (const [provider, expected] of [[issuer, plainIssuer], [plainIssuer, issuer]]) {
+      const oneSided = await cliReport(fixture({
+        metadata: metadata({ issuer: provider }),
+        client: client({ expectedIssuer: expected }),
+      }))
+      assert.equal(oneSided.code, 2, `U+${point.toString(16)} on one issuer side`)
+      assert.equal(oneSided.report.profile.issuerMatches, null)
+      assert.equal(oneSided.stdout.includes(mark), false)
+    }
+  }
+})
+
+test('default-ignorable marks in untrusted report labels are stripped before JSON output', async () => {
+  const mark = String.fromCharCode(0x034f)
+  const { code, stdout, report } = await cliReport(fixture({
+    metadata: metadata({ [`tenant${mark}id`]: 'synthetic' }),
+  }))
+  assert.equal(code, 0)
+  assert.equal(report.status, 'pass')
+  assert.equal(findingsFor(report, 'metadata-key-unknown').length, 1)
+  assert.equal(stdout.includes(mark), false)
+  assert.equal(hasForbiddenCharacter(JSON.stringify(report)), false)
+})
+
 test('a line separator arriving through an identifier cannot forge a line in the human report', async () => {
   for (const character of [FORBIDDEN['C0 LF'], FORBIDDEN['C1 NEL'], FORBIDDEN['line separator'], FORBIDDEN['paragraph separator']]) {
     const files = fixture({

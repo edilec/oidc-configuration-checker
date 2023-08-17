@@ -32,7 +32,7 @@ export function byCodeUnit(left, right) {
 }
 
 /**
- * The characters no untrusted value may carry into output, in four classes.
+ * The characters no untrusted value may carry into output, in five classes.
  *
  * Built from code points rather than written literally: a literal U+2028 or
  * U+2029 inside a module is a line terminator to the JavaScript parser, and the
@@ -53,6 +53,9 @@ export function byCodeUnit(left, right) {
  *   other than the value that was compared. Ordinary right-to-left text --
  *   Arabic, Hebrew -- needs none of these: the letters carry their own
  *   direction, so refusing the overrides refuses nothing legitimate.
+ * - **Default-ignorable code points**, including U+034F COMBINING GRAPHEME
+ *   JOINER and U+FE0F VARIATION SELECTOR-16. They can alter the exact raw URI
+ *   identity while leaving a printed value visually unchanged.
  */
 const DEL_AND_C1 = `${String.fromCharCode(0x7f)}-${String.fromCharCode(0x9f)}`
 const SEPARATORS = `${String.fromCharCode(0x2028)}${String.fromCharCode(0x2029)}`
@@ -73,23 +76,24 @@ const CONTROL = new RegExp(
   `[${String.fromCharCode(0)}-${String.fromCharCode(8)}` +
   `${String.fromCharCode(11)}${String.fromCharCode(12)}` +
   `${String.fromCharCode(14)}-${String.fromCharCode(31)}` +
-  `${DEL_AND_C1}${SEPARATORS}${BIDI}]`,
-  'g',
+  `${DEL_AND_C1}${SEPARATORS}${BIDI}]|\\p{Default_Ignorable_Code_Point}`,
+  'gu',
 )
 
 /**
- * What an identifier or a URI may not contain: the same four classes, plus the
+ * What an identifier or a URI may not contain: the same five classes, plus the
  * three ASCII whitespace controls `CONTROL` leaves to the collapse. A key id
  * that prints differently from the value the rotation check compared is a key
  * nobody can audit, so it is refused at the door rather than cleaned up.
  */
 const FORBIDDEN = new RegExp(
   `[${String.fromCharCode(0)}-${String.fromCharCode(31)}` +
-  `${DEL_AND_C1}${SEPARATORS}${BIDI}]`,
+  `${DEL_AND_C1}${SEPARATORS}${BIDI}]|\\p{Default_Ignorable_Code_Point}`,
+  'u',
 )
 
 /**
- * Detects any of the four classes anywhere in a string. Exported so tests can
+ * Detects any of the five classes anywhere in a string. Exported so tests can
  * walk an entire serialised report and assert that nothing survived anywhere,
  * rather than checking the one field a developer remembered to sanitise.
  */

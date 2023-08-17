@@ -111,11 +111,12 @@ function issuerEvidence(provider, expected) {
  * which gets its own rule because it is the mismatch people argue about.
  */
 function checkIssuer(sink, files, metadata, client) {
-  const result = { issuer: null, expectedIssuer: null, matches: null, settings: 0, origin: null }
+  const result = { issuer: null, expectedIssuer: null, matches: null, settings: 0, origin: null, incomplete: false }
 
   if (typeof metadata.issuer === 'string') {
     const inspected = inspectEndpoint(metadata.issuer)
     if (!inspected.ok) {
+      if (inspected.reason === 'forbidden-character') result.incomplete = true
       sink.add({
         file: files.metadata,
         pointer: '/issuer',
@@ -149,6 +150,7 @@ function checkIssuer(sink, files, metadata, client) {
   if (typeof client.expectedIssuer === 'string') {
     const inspected = inspectEndpoint(client.expectedIssuer)
     if (!inspected.ok) {
+      if (inspected.reason === 'forbidden-character') result.incomplete = true
       sink.add({
         file: files.client,
         pointer: '/expectedIssuer',
@@ -976,6 +978,7 @@ export function runChecks(sink, files, compiled, budget) {
   profile.expectedIssuer = issuer.expectedIssuer
   profile.issuerMatches = issuer.matches
   counts.settings += issuer.settings
+  if (issuer.incomplete) state.incomplete = true
 
   counts.endpoints = checkEndpoints(sink, files, metadata, issuer.origin, budget)
 

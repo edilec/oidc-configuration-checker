@@ -396,6 +396,8 @@ function checkRedirects(sink, files, client, policy, budget) {
 
     result.counts[spec.key] = clientSide.usable.length
     result[spec.key] = clientSide.usable
+      .slice()
+      .sort((left, right) => byCodeUnit(left.value, right.value))
       .map((entry) => ({
         uri: excerpt(entry.value, 200),
         status: entry.status,
@@ -403,7 +405,6 @@ function checkRedirects(sink, files, client, policy, budget) {
           ? { rawSha256: createHash('sha256').update(entry.value, 'utf16le').digest('hex') }
           : {}),
       }))
-      .sort((left, right) => byCodeUnit(left.uri, right.uri))
   }
 
   return result

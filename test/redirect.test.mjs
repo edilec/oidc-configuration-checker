@@ -76,6 +76,18 @@ test('the profile URI identity marker starts only beyond the 200-unit display bo
   assert.match(truncated.profile.redirectUris[0].rawSha256, /^[a-f0-9]{64}$/)
 })
 
+test('profile rows with identical long excerpts are ordered by the raw URI', async () => {
+  const left = `https://app.example.invalid/${'a'.repeat(205)}X`
+  const right = `https://app.example.invalid/${'a'.repeat(205)}Y`
+  const ascending = await apiReport(withUris([left, right], [left, right]))
+  const descending = await apiReport(withUris([right, left], [left, right]))
+  assert.equal(ascending.status, 'pass')
+  assert.equal(descending.status, 'pass')
+  assert.equal(ascending.profile.redirectUris[0].uri, ascending.profile.redirectUris[1].uri)
+  assert.notEqual(ascending.profile.redirectUris[0].rawSha256, ascending.profile.redirectUris[1].rawSha256)
+  assert.deepEqual(descending.profile.redirectUris, ascending.profile.redirectUris)
+})
+
 test('a URI that differs only in letter case does not match, and the suggestion says why', async () => {
   const report = await apiReport(withUris(['https://APP.example.invalid/auth/callback'], [CALLBACK]))
 

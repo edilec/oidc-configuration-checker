@@ -157,6 +157,7 @@ encoded as UTF-16LE. This identifies distinct long values whose excerpts look
 the same; it is not a credential or a live-provider check. When two rendered
 URI excerpts collide, the findings name the first differing raw UTF-16 offset
 and units without echoing the omitted URI text.
+Profile URI rows are ordered by the exact raw URI, not by its excerpt.
 If an entry in either redirect list cannot be evaluated, the run is incomplete.
 Known exact matches stay `allowlisted`, but unmatched rows are `unknown` and
 the tool makes no `not-allowlisted` or `unused` claim from a partial list.

@@ -33,18 +33,22 @@ test('a URI that differs from the allowlist only by a trailing slash does not ma
   assert.equal(uriRow(report, `${CALLBACK}/`).status, 'not-allowlisted')
 })
 
-test('long redirect collision evidence and profile identity distinguish exact values in both directions', async () => {
-  const left = `https://app.example.invalid/${'a'.repeat(205)}X`
-  const right = `https://app.example.invalid/${'a'.repeat(205)}Y`
+test('long redirect mismatch locates exact sources without exposing hidden query values or a digest', async () => {
+  const prefix = `https://app.example.invalid/cb?pad=${'a'.repeat(205)}&code=`
+  const left = `${prefix}RED`
+  const right = `${prefix}BLUE`
   const control = await cliReport(withUris([left], [left]))
   assert.equal(control.code, 0)
   assert.equal(control.report.status, 'pass')
   assert.equal(control.report.profile.redirectUris[0].status, 'allowlisted')
-  assert.match(control.report.profile.redirectUris[0].rawSha256, /^[a-f0-9]{64}$/)
+  assert.equal(control.report.profile.redirectUris[0].pointer, '/redirectUris/0')
+  assert.equal(control.report.profile.redirectUris[0].truncated, true)
+  assert.equal(Object.hasOwn(control.report.profile.redirectUris[0], 'rawSha256'), false)
+  assert.equal(JSON.stringify(control.report).includes('RED'), false)
 
-  for (const [registered, allowed, registeredUnit, allowedUnit] of [
-    [left, right, 'U+0058', 'U+0059'],
-    [right, left, 'U+0059', 'U+0058'],
+  for (const [registered, allowed] of [
+    [left, right],
+    [right, left],
   ]) {
     const { code, report } = await cliReport(withUris([registered], [allowed]))
     assert.equal(code, 1)
@@ -53,15 +57,20 @@ test('long redirect collision evidence and profile identity distinguish exact va
     const unused = findingsFor(report, 'redirect-uri-unused')[0]
     assert.equal(denied.location.pointer, '/redirectUris/0')
     assert.equal(unused.location.pointer, '/allowedRedirectUris/0')
-    assert.equal(denied.evidence.includes(`raw UTF-16 offset ${left.length - 1}: client ${registeredUnit} vs policy ${allowedUnit}`), true)
-    assert.equal(unused.evidence.includes(`raw UTF-16 offset ${left.length - 1}: policy ${allowedUnit} vs client ${registeredUnit}`), true)
-    assert.match(report.profile.redirectUris[0].rawSha256, /^[a-f0-9]{64}$/)
-    if (registered === left) assert.equal(report.profile.redirectUris[0].rawSha256, control.report.profile.redirectUris[0].rawSha256)
-    else assert.notEqual(report.profile.redirectUris[0].rawSha256, control.report.profile.redirectUris[0].rawSha256)
+    assert.equal(denied.evidence, 'Exact URL values differ beyond the displayed excerpt; client /redirectUris/0; policy /allowedRedirectUris/0')
+    assert.equal(unused.evidence, 'Exact URL values differ beyond the displayed excerpt; policy /allowedRedirectUris/0; client /redirectUris/0')
+    assert.equal(report.profile.redirectUris[0].pointer, '/redirectUris/0')
+    assert.equal(report.profile.redirectUris[0].truncated, true)
+    const rendered = JSON.stringify(report)
+    assert.equal(rendered.includes('rawSha256'), false)
+    assert.equal(rendered.includes('RED'), false)
+    assert.equal(rendered.includes('BLUE'), false)
+    assert.equal(rendered.includes('U+0052'), false)
+    assert.equal(rendered.includes('U+0042'), false)
   }
 })
 
-test('the profile URI identity marker starts only beyond the 200-unit display bound', async () => {
+test('the profile URI truncation flag starts only beyond the 200-unit display bound', async () => {
   const prefix = 'https://app.example.invalid/'
   const atBound = `${prefix}${'a'.repeat(200 - prefix.length)}`
   const overBound = `${atBound}X`
@@ -71,9 +80,11 @@ test('the profile URI identity marker starts only beyond the 200-unit display bo
   assert.equal(exact.status, 'pass')
   assert.equal(truncated.status, 'pass')
   assert.equal(exact.profile.redirectUris[0].uri, atBound)
-  assert.equal(Object.hasOwn(exact.profile.redirectUris[0], 'rawSha256'), false)
+  assert.equal(exact.profile.redirectUris[0].pointer, '/redirectUris/0')
+  assert.equal(exact.profile.redirectUris[0].truncated, false)
   assert.equal(truncated.profile.redirectUris[0].uri.endsWith('...'), true)
-  assert.match(truncated.profile.redirectUris[0].rawSha256, /^[a-f0-9]{64}$/)
+  assert.equal(truncated.profile.redirectUris[0].truncated, true)
+  assert.equal(Object.hasOwn(truncated.profile.redirectUris[0], 'rawSha256'), false)
 })
 
 test('profile rows with identical long excerpts are ordered by the raw URI', async () => {
@@ -84,8 +95,8 @@ test('profile rows with identical long excerpts are ordered by the raw URI', asy
   assert.equal(ascending.status, 'pass')
   assert.equal(descending.status, 'pass')
   assert.equal(ascending.profile.redirectUris[0].uri, ascending.profile.redirectUris[1].uri)
-  assert.notEqual(ascending.profile.redirectUris[0].rawSha256, ascending.profile.redirectUris[1].rawSha256)
-  assert.deepEqual(descending.profile.redirectUris, ascending.profile.redirectUris)
+  assert.deepEqual(ascending.profile.redirectUris.map((row) => row.pointer), ['/redirectUris/0', '/redirectUris/1'])
+  assert.deepEqual(descending.profile.redirectUris.map((row) => row.pointer), ['/redirectUris/1', '/redirectUris/0'])
 })
 
 test('a URI that differs only in letter case does not match, and the suggestion says why', async () => {
@@ -230,7 +241,7 @@ test('post-logout URIs are compared against their own allowlist', async () => {
 
   assert.equal(findingsFor(report, 'redirect-uri-not-allowlisted')[0].location.pointer, '/postLogoutRedirectUris/0')
   assert.equal(report.summary.postLogoutUris, 1)
-  assert.deepEqual(report.profile.postLogoutUris, [{ uri: 'https://app.example.invalid/bye', status: 'not-allowlisted' }])
+  assert.deepEqual(report.profile.postLogoutUris, [{ uri: 'https://app.example.invalid/bye', pointer: '/postLogoutRedirectUris/0', truncated: false, status: 'not-allowlisted' }])
 })
 
 test('a client that registers no redirect URI at all is missing a required field', async () => {

@@ -116,8 +116,8 @@ test('nothing that ships could acquire a token, verify one, or perform any part 
 
   assert.deepEqual(
     source.split('\n').filter((line) => line.includes('node:crypto')),
-    ["import { createHash } from 'node:crypto'"],
-    'the only cryptographic capability shipped is a hash for bounded URI identity labels',
+    [],
+    'the report does not publish a cryptographic identity label for a URI',
   )
 
   for (const verb of [

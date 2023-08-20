@@ -21,8 +21,6 @@
  *   loose behaviour cannot detect it.
  */
 
-import { createHash } from 'node:crypto'
-
 import {
   KEY_TYPES,
   KEY_USES,
@@ -332,7 +330,7 @@ function compareUriList(sink, files, field, policyField, entries, allowedEntries
       message: `This redirect URI is not in the policy's "${policyField}" list. It is compared as one exact string against another, which is what stops a registration from covering a host the deployment never approved.`,
       evidence: sameExcerpt === undefined
         ? excerpt(entry.value, 120)
-        : `client/policy ${excerpt(entry.value, 50)}; ${firstRawDifference(entry.value, sameExcerpt.value, 'client', 'policy')}`,
+        : `Exact URL values differ beyond the displayed excerpt; client ${entry.pointer}; policy ${sameExcerpt.pointer}`,
       suggestion: near === undefined
         ? `Add the URI to "${policyField}", or remove it from "${field}".`
         : 'The policy lists a URI that differs from this one only in letter case; an exact-match policy treats the two as different. Make them identical.',
@@ -389,7 +387,7 @@ function checkRedirects(sink, files, client, policy, budget) {
           message: 'The policy allows this redirect URI and this client registers no such URI. A spare entry is reported rather than refused: another client may use it, and this tool reads one client.',
           evidence: sameExcerpt === undefined
             ? excerpt(entry.value, 120)
-            : `policy/client ${excerpt(entry.value, 50)}; ${firstRawDifference(entry.value, sameExcerpt.value, 'policy', 'client')}`,
+            : `Exact URL values differ beyond the displayed excerpt; policy ${entry.pointer}; client ${sameExcerpt.pointer}`,
         })
       }
     }
@@ -400,10 +398,9 @@ function checkRedirects(sink, files, client, policy, budget) {
       .sort((left, right) => byCodeUnit(left.value, right.value))
       .map((entry) => ({
         uri: excerpt(entry.value, 200),
+        pointer: entry.pointer,
+        truncated: entry.value.length > 200,
         status: entry.status,
-        ...(entry.value.length > 200
-          ? { rawSha256: createHash('sha256').update(entry.value, 'utf16le').digest('hex') }
-          : {}),
       }))
   }
 

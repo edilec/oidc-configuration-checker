@@ -52,7 +52,7 @@ test('the clean example is ready for a rotation, with every key identified', asy
     ],
   )
   assert.deepEqual(report.profile.redirectUris, [
-    { uri: 'https://app.example.invalid/auth/callback', status: 'allowlisted' },
+    { uri: 'https://app.example.invalid/auth/callback', pointer: '/redirectUris/0', truncated: false, status: 'allowlisted' },
   ])
 })
 
@@ -105,6 +105,6 @@ test('the incomplete example still reports what it did establish', async () => {
 
   assert.equal(report.profile.issuerMatches, true)
   assert.deepEqual(report.profile.redirectUris, [
-    { uri: 'https://app.example.invalid/auth/callback', status: 'allowlisted' },
+    { uri: 'https://app.example.invalid/auth/callback', pointer: '/redirectUris/0', truncated: false, status: 'allowlisted' },
   ])
 })

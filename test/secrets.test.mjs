@@ -150,7 +150,7 @@ test('a redirect URI that is accepted is echoed on purpose, and that is the only
   // ever does -- which is what every other case in this file pins.
   const { report } = await streamsFor(clean())
 
-  assert.deepEqual(report.profile.redirectUris, [{ uri: CALLBACK, status: 'allowlisted' }])
+  assert.deepEqual(report.profile.redirectUris, [{ uri: CALLBACK, pointer: '/redirectUris/0', truncated: false, status: 'allowlisted' }])
 })
 
 test('no fixture in the shipped examples carries a private key parameter', async () => {

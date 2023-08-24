@@ -3,6 +3,8 @@ import test from 'node:test'
 
 import {
   CALLBACK,
+  SIGNED_OUT,
+  apiReport,
   clean,
   client,
   cliRun,
@@ -14,7 +16,7 @@ import {
   rsaKey,
   withRoot,
 } from './support.mjs'
-import { parseFailureDetail } from '../src/index.mjs'
+import { formatReport, parseFailureDetail } from '../src/index.mjs'
 
 /**
  * Nothing that looks like a credential reaches either stream.
@@ -143,14 +145,92 @@ test('an over-length description is refused without a word of it reaching the re
   assertNoTrace(scanned, CARD_CANARY, 'policy description')
 })
 
-test('a redirect URI that is accepted is echoed on purpose, and that is the only kind that is', async () => {
+test('a queryless accepted redirect URI keeps its exact display', async () => {
   // Worth stating plainly: a registered redirect URI is public configuration
-  // and the report exists to tell you which ones are registered, so an accepted
-  // URI appears in the profile and in the evidence. Nothing that was *refused*
-  // ever does -- which is what every other case in this file pins.
+  // and the report exists to tell you which ones are registered. Its queryless
+  // spelling can appear in the profile. Query and fragment values are different:
+  // exact comparison still reads them, but the report must not publish them.
   const { report } = await streamsFor(clean())
 
-  assert.deepEqual(report.profile.redirectUris, [{ uri: CALLBACK, pointer: '/redirectUris/0', truncated: false, status: 'allowlisted' }])
+  assert.deepEqual(report.profile.redirectUris, [{ uri: CALLBACK, pointer: '/redirectUris/0', truncated: false, redacted: false, status: 'allowlisted' }])
+})
+
+test('accepted query-bearing URI values stay exact for matching but are redacted in profile and both streams', async () => {
+  const canary = 'SYNTHETIC_SECRET_CANARY'
+  const redirect = `${CALLBACK}?code=${canary}`
+  const logout = `${SIGNED_OUT}?code=${canary}`
+  const input = fixture({
+    client: client({ redirectUris: [redirect], postLogoutRedirectUris: [logout] }),
+    policy: policy({ allowedRedirectUris: [redirect], allowedPostLogoutRedirectUris: [logout] }),
+  })
+  const report = await apiReport(input)
+  assert.equal(report.status, 'pass')
+  assert.deepEqual(report.findings, [])
+  assert.deepEqual(report.profile.redirectUris[0], {
+    uri: `${CALLBACK}?[redacted-query]`, pointer: '/redirectUris/0', truncated: false, redacted: true, status: 'allowlisted',
+  })
+  assert.deepEqual(report.profile.postLogoutUris[0], {
+    uri: `${SIGNED_OUT}?[redacted-query]`, pointer: '/postLogoutRedirectUris/0', truncated: false, redacted: true, status: 'allowlisted',
+  })
+  assert.equal(JSON.stringify(report).includes(canary), false)
+  assert.equal(formatReport(report).includes(canary), false)
+  await withRoot(input, async (root) => {
+    const run = await cliRun(['--root', root])
+    assert.equal(run.code, 0)
+    assert.equal(run.stdout.includes(canary), false)
+    assert.equal(run.stderr.includes(canary), false)
+  })
+})
+
+test('query-bearing mismatch, spare allowlist entry, issuer and endpoint findings never publish query text', async () => {
+  const canary = 'SYNTHETIC_SECRET_CANARY'
+  const redirect = `${CALLBACK}?code=${canary}`
+  const mismatch = await apiReport(fixture({ client: client({ redirectUris: [redirect] }) }))
+  assert.equal(mismatch.status, 'fail')
+  assert.equal(JSON.stringify(mismatch).includes(canary), false)
+  assert.equal(findingsFor(mismatch, 'redirect-uri-not-allowlisted')[0].location.pointer, '/redirectUris/0')
+
+  const unused = await apiReport(fixture({ policy: policy({ allowedRedirectUris: [CALLBACK, redirect] }) }))
+  assert.equal(unused.status, 'pass')
+  assert.equal(JSON.stringify(unused).includes(canary), false)
+  assert.equal(findingsFor(unused, 'redirect-uri-unused')[0].location.pointer, '/allowedRedirectUris/1')
+
+  const issuer = `https://id.example.invalid/issuer?code=${canary}`
+  const provider = await apiReport(fixture({
+    metadata: metadata({ issuer, authorization_endpoint: `http://id.example.invalid/authorize?code=${canary}` }),
+    client: client({ expectedIssuer: issuer }),
+  }))
+  assert.equal(provider.status, 'fail')
+  assert.equal(provider.profile.issuer, 'https://id.example.invalid/issuer?[redacted-query]')
+  assert.equal(provider.profile.expectedIssuer, provider.profile.issuer)
+  assert.equal(JSON.stringify(provider).includes(canary), false)
+  assert.equal(formatReport(provider).includes(canary), false)
+  assert.equal(findingsFor(provider, 'issuer-invalid').length > 0, true)
+  assert.equal(findingsFor(provider, 'endpoint-not-https').length > 0, true)
+
+  const differentIssuer = await apiReport(fixture({
+    metadata: metadata({ issuer }),
+    client: client({ expectedIssuer: 'https://id.example.invalid/issuer?code=OTHER' }),
+  }))
+  assert.equal(differentIssuer.status, 'fail')
+  assert.equal(findingsFor(differentIssuer, 'issuer-mismatch')[0].evidence,
+    'Exact issuer values differ beyond the displayed excerpt; provider /issuer; client /expectedIssuer')
+  assert.equal(JSON.stringify(differentIssuer).includes(canary), false)
+  assert.equal(formatReport(differentIssuer).includes(canary), false)
+})
+
+test('fragment text is marked as redacted even when the URI remains exactly allowlisted', async () => {
+  const canary = 'SYNTHETIC_SECRET_CANARY'
+  const uri = `${CALLBACK}#${canary}`
+  const report = await apiReport(fixture({
+    client: client({ redirectUris: [uri] }),
+    policy: policy({ allowedRedirectUris: [uri] }),
+  }))
+  assert.equal(report.profile.redirectUris[0].status, 'allowlisted')
+  assert.equal(report.profile.redirectUris[0].uri, `${CALLBACK}#[redacted-fragment]`)
+  assert.equal(report.profile.redirectUris[0].redacted, true)
+  assert.equal(JSON.stringify(report).includes(canary), false)
+  assert.equal(formatReport(report).includes(canary), false)
 })
 
 test('no fixture in the shipped examples carries a private key parameter', async () => {

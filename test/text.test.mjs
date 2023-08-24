@@ -14,6 +14,7 @@ import {
   isToken,
 } from '../src/index.mjs'
 import { inspectEndpoint, inspectRedirectUri } from '../src/uri.mjs'
+import { urlDisplay } from '../src/text.mjs'
 import { FORBIDDEN } from './support.mjs'
 
 /** The primitives every other module leans on, exercised directly. */
@@ -41,6 +42,23 @@ test('excerpt flattens, strips and bounds', () => {
   assert.equal(excerpt('  spaced   out  '), 'spaced out')
   assert.equal(excerpt('x'.repeat(300)).length, 163)
   assert.equal(excerpt('x'.repeat(300)).endsWith('...'), true)
+})
+
+test('URL display reserves query and fragment markers at the exact path bound', () => {
+  const marker = '?[redacted-query]'
+  const atBound = 'x'.repeat(60 - marker.length)
+  assert.deepEqual(urlDisplay(`${atBound}?code=SYNTHETIC_SECRET_CANARY`, 60), {
+    text: `${atBound}${marker}`, truncated: false, redacted: true,
+  })
+  assert.deepEqual(urlDisplay(`${atBound}X?code=SYNTHETIC_SECRET_CANARY`, 60), {
+    text: `${atBound}...${marker}`, truncated: true, redacted: true,
+  })
+  assert.deepEqual(urlDisplay('com.example.app:/callback#secret?still-fragment', 60), {
+    text: 'com.example.app:/callback#[redacted-fragment]', truncated: false, redacted: true,
+  })
+  assert.deepEqual(urlDisplay('https://app.example.invalid/cb', 60), {
+    text: 'https://app.example.invalid/cb', truncated: false, redacted: false,
+  })
 })
 
 test('an identifier is bounded, control-free and drawn from the documented alphabet', () => {

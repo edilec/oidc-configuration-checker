@@ -138,7 +138,7 @@ measured or echoed. `minimumKeys` says how many usable keys a rotation needs.
     "issuer": "https://login.example.invalid",
     "expectedIssuer": "https://id.example.invalid",
     "issuerMatches": false,
-    "redirectUris": [{ "uri": "https://app.example.invalid/auth/callback", "pointer": "/redirectUris/0", "truncated": false, "status": "allowlisted" }],
+    "redirectUris": [{ "uri": "https://app.example.invalid/auth/callback", "pointer": "/redirectUris/0", "truncated": false, "redacted": false, "status": "allowlisted" }],
     "postLogoutUris": [],
     "signingKeys": [{ "kid": null, "kty": "RSA", "alg": "RS256", "status": "refused" }],
     "algorithms": { "selected": "RS256", "offered": ["RS256", "none"], "permitted": ["ES256", "RS256"] }
@@ -151,13 +151,16 @@ measured or echoed. `minimumKeys` says how many usable keys a rotation needs.
 `issuerMatches` is `true`, `false` or `null` — and `null` means *not compared*,
 never *fine*. A key's `status` is `usable`, `not-permitted`, `encryption`,
 `refused` or `unknown`, and only `usable` counts toward a rotation.
-Long redirect URIs are displayed as bounded excerpts. Each profile row retains
-its original client-document `pointer` and an explicit `truncated` flag; it does
-not publish a hash of the full URI. The pointer identifies where to inspect the
-authoritative value when excerpts look the same. When exact URI values differ
-beyond a displayed excerpt, findings point to both client and policy entries
-without disclosing hidden query text or individual code units. Profile URI rows
-are ordered by the exact raw URI, not by its excerpt.
+URI values in the report are bounded displays, not the strings compared. Query
+and fragment contents are replaced by `?[redacted-query]` and
+`#[redacted-fragment]`; this also applies to issuer and endpoint evidence and
+the human summary. Each redirect profile row retains its original
+client-document `pointer`, a `redacted` flag for a query or fragment, and a
+separate `truncated` flag when the displayed path was cut for length. No full-URI
+hash is published. The pointer identifies where to inspect the authoritative
+value when displays look the same. Findings about exact values that render the
+same point to both source entries without disclosing query text or code units.
+Profile URI rows are ordered by the exact raw URI, not by its display.
 If an entry in either redirect list cannot be evaluated, the run is incomplete.
 Known exact matches stay `allowlisted`, but unmatched rows are `unknown` and
 the tool makes no `not-allowlisted` or `unused` claim from a partial list.

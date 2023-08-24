@@ -124,6 +124,30 @@ export function excerpt(value, limit = EXCERPT_LIMIT) {
 }
 
 /**
+ * Display a URI without publishing query or fragment text. Comparisons still
+ * use the original string; this function is only for report fields. Splitting
+ * on the raw delimiters preserves private-use URI spellings and bare `?`/`#`.
+ * Space is reserved for the markers so a long path cannot hide the fact that
+ * information was redacted.
+ */
+export function urlDisplay(value, limit = EXCERPT_LIMIT) {
+  const raw = String(value)
+  const fragmentAt = raw.indexOf('#')
+  const questionAt = raw.indexOf('?')
+  const queryAt = questionAt >= 0 && (fragmentAt < 0 || questionAt < fragmentAt) ? questionAt : -1
+  const prefixEnd = queryAt >= 0 ? queryAt : fragmentAt >= 0 ? fragmentAt : raw.length
+  const markers = `${queryAt >= 0 ? '?[redacted-query]' : ''}${fragmentAt >= 0 ? '#[redacted-fragment]' : ''}`
+  const prefix = raw.slice(0, prefixEnd).replace(CONTROL, ' ').replace(/\s+/g, ' ').trim()
+  const available = Math.max(0, limit - markers.length)
+  const truncated = prefix.length > available
+  return {
+    text: `${truncated ? `${prefix.slice(0, available)}...` : prefix}${markers}`,
+    truncated,
+    redacted: markers !== '',
+  }
+}
+
+/**
  * The identifier alphabet: key ids and client ids.
  *
  * Wide enough for the spellings real providers use -- a UUID, a base64url

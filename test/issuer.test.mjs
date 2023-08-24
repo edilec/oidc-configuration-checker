@@ -31,7 +31,7 @@ test('an issuer the client does not expect is reported against the client', asyn
   assert.equal(report.profile.issuerMatches, false)
 })
 
-test('long issuer mismatch evidence identifies the first raw UTF-16 difference in both directions', async () => {
+test('long issuer mismatch evidence points to exact source fields without revealing hidden units', async () => {
   const left = `${ISSUER}/${'a'.repeat(70)}X`
   const right = `${ISSUER}/${'a'.repeat(70)}Y`
   const control = await cliReport(fixture({ metadata: metadata({ issuer: left }), client: client({ expectedIssuer: left }) }))
@@ -39,9 +39,9 @@ test('long issuer mismatch evidence identifies the first raw UTF-16 difference i
   assert.equal(control.report.status, 'pass')
   assert.equal(control.report.profile.issuerMatches, true)
 
-  for (const [provider, expected, providerUnit, clientUnit] of [
-    [left, right, 'U+0058', 'U+0059'],
-    [right, left, 'U+0059', 'U+0058'],
+  for (const [provider, expected] of [
+    [left, right],
+    [right, left],
   ]) {
     const { code, report } = await cliReport(fixture({
       metadata: metadata({ issuer: provider }),
@@ -52,10 +52,7 @@ test('long issuer mismatch evidence identifies the first raw UTF-16 difference i
     assert.equal(report.profile.issuerMatches, false)
     const finding = findingsFor(report, 'issuer-mismatch')[0]
     assert.equal(finding.location.pointer, '/expectedIssuer')
-    assert.equal(
-      finding.evidence.includes(`raw UTF-16 offset ${left.length - 1}: provider ${providerUnit} vs client ${clientUnit}`),
-      true,
-    )
+    assert.equal(finding.evidence, 'Exact issuer values differ beyond the displayed excerpt; provider /issuer; client /expectedIssuer')
   }
 })
 

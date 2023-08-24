@@ -32,7 +32,7 @@ import {
   inspectKeyMaterial,
   privateParametersIn,
 } from './algorithms.mjs'
-import { byCodeUnit, describeValue, excerpt, isIdentifier, isToken } from './text.mjs'
+import { byCodeUnit, describeValue, excerpt, isIdentifier, isToken, urlDisplay } from './text.mjs'
 import { inspectEndpoint, inspectRedirectUri } from './uri.mjs'
 
 /** The one redirect matching mode this tool will call satisfied. */
@@ -79,22 +79,12 @@ const NOTE_RULES = Object.freeze({
   },
 })
 
-/** Distinguish exact strings whose bounded, safe excerpts happen to collide. */
-function firstRawDifference(left, right, leftName, rightName) {
-  let offset = 0
-  while (offset < left.length && offset < right.length && left.charCodeAt(offset) === right.charCodeAt(offset)) offset += 1
-  const unit = (value) => offset === value.length
-    ? 'end'
-    : `U+${value.charCodeAt(offset).toString(16).toUpperCase().padStart(4, '0')}`
-  return `raw UTF-16 offset ${offset}: ${leftName} ${unit(left)} vs ${rightName} ${unit(right)}`
-}
-
 function issuerEvidence(provider, expected) {
-  const providerLabel = excerpt(provider, 60)
-  const clientLabel = excerpt(expected, 60)
+  const providerLabel = urlDisplay(provider, 60).text
+  const clientLabel = urlDisplay(expected, 60).text
   const base = `provider ${providerLabel} vs client ${clientLabel}`
   return providerLabel === clientLabel
-    ? `provider/client ${providerLabel}; ${firstRawDifference(provider, expected, 'provider', 'client')}`
+    ? 'Exact issuer values differ beyond the displayed excerpt; provider /issuer; client /expectedIssuer'
     : base
 }
 
@@ -130,7 +120,7 @@ function checkIssuer(sink, files, metadata, client) {
           pointer: '/issuer',
           ruleId: 'issuer-not-https',
           message: 'The issuer is not an https URL. An issuer identifier is the trust anchor for every ID token this client accepts; over http it is asserted by whoever is on the path.',
-          evidence: excerpt(metadata.issuer, 120),
+          evidence: urlDisplay(metadata.issuer, 120).text,
         })
       }
       if (inspected.hasQuery || inspected.hasFragment) {
@@ -139,7 +129,7 @@ function checkIssuer(sink, files, metadata, client) {
           pointer: '/issuer',
           ruleId: 'issuer-invalid',
           message: 'An issuer identifier carries no query and no fragment component (OpenID Connect Discovery 1.0, section 2); this one does.',
-          evidence: excerpt(metadata.issuer, 120),
+          evidence: urlDisplay(metadata.issuer, 120).text,
         })
       }
     }
@@ -213,7 +203,7 @@ function checkEndpoints(sink, files, metadata, issuerOrigin, budget) {
         pointer: `/${endpoint.field}`,
         ruleId: 'endpoint-not-https',
         message: `"${endpoint.field}" is not an https URL. OpenID Connect requires TLS on every endpoint that carries an authorization code, a token or a key set.`,
-        evidence: excerpt(endpoint.value, 120),
+        evidence: urlDisplay(endpoint.value, 120).text,
       })
     }
     if (issuerOrigin !== null && inspected.origin !== issuerOrigin) {
@@ -277,7 +267,7 @@ function readUriList(sink, file, field, raw, budget) {
         pointer,
         ruleId: rule.ruleId,
         message: `This redirect URI ${rule.message}`,
-        evidence: excerpt(value, 120),
+        evidence: urlDisplay(value, 120).text,
         suggestion: rule.suggestion,
       })
     }
@@ -288,7 +278,7 @@ function readUriList(sink, file, field, raw, budget) {
         pointer,
         ruleId: 'redirect-uri-duplicate',
         message: 'This redirect URI is listed more than once. The repeat adds nothing and was counted once; a list that looks longer than it is hides how much surface the client really has.',
-        evidence: excerpt(value, 120),
+        evidence: urlDisplay(value, 120).text,
       })
       continue
     }
@@ -322,14 +312,14 @@ function compareUriList(sink, files, field, policyField, entries, allowedEntries
     }
     entry.status = 'not-allowlisted'
     const near = folded.get(entry.value.toLowerCase())
-    const sameExcerpt = allowedEntries.find((allowed) => excerpt(allowed.value, 120) === excerpt(entry.value, 120))
+    const sameExcerpt = allowedEntries.find((allowed) => urlDisplay(allowed.value, 120).text === urlDisplay(entry.value, 120).text)
     sink.add({
       file: files.client,
       pointer: entry.pointer,
       ruleId: 'redirect-uri-not-allowlisted',
       message: `This redirect URI is not in the policy's "${policyField}" list. It is compared as one exact string against another, which is what stops a registration from covering a host the deployment never approved.`,
       evidence: sameExcerpt === undefined
-        ? excerpt(entry.value, 120)
+        ? urlDisplay(entry.value, 120).text
         : `Exact URL values differ beyond the displayed excerpt; client ${entry.pointer}; policy ${sameExcerpt.pointer}`,
       suggestion: near === undefined
         ? `Add the URI to "${policyField}", or remove it from "${field}".`
@@ -379,14 +369,14 @@ function checkRedirects(sink, files, client, policy, budget) {
     if (relationComplete) {
       for (const entry of policySide.usable) {
         if (used.has(entry.value)) continue
-        const sameExcerpt = clientSide.usable.find((clientEntry) => excerpt(clientEntry.value, 120) === excerpt(entry.value, 120))
+        const sameExcerpt = clientSide.usable.find((clientEntry) => urlDisplay(clientEntry.value, 120).text === urlDisplay(entry.value, 120).text)
         sink.add({
           file: files.policy,
           pointer: entry.pointer,
           ruleId: 'redirect-uri-unused',
           message: 'The policy allows this redirect URI and this client registers no such URI. A spare entry is reported rather than refused: another client may use it, and this tool reads one client.',
           evidence: sameExcerpt === undefined
-            ? excerpt(entry.value, 120)
+            ? urlDisplay(entry.value, 120).text
             : `Exact URL values differ beyond the displayed excerpt; policy ${entry.pointer}; client ${sameExcerpt.pointer}`,
         })
       }
@@ -396,12 +386,16 @@ function checkRedirects(sink, files, client, policy, budget) {
     result[spec.key] = clientSide.usable
       .slice()
       .sort((left, right) => byCodeUnit(left.value, right.value))
-      .map((entry) => ({
-        uri: excerpt(entry.value, 200),
-        pointer: entry.pointer,
-        truncated: entry.value.length > 200,
-        status: entry.status,
-      }))
+      .map((entry) => {
+        const display = urlDisplay(entry.value, 200)
+        return {
+          uri: display.text,
+          pointer: entry.pointer,
+          truncated: display.truncated,
+          redacted: display.redacted,
+          status: entry.status,
+        }
+      })
   }
 
   return result
@@ -972,8 +966,8 @@ export function runChecks(sink, files, compiled, budget) {
   const { metadata, client, policy, jwks } = compiled
 
   const issuer = checkIssuer(sink, files, metadata, client)
-  profile.issuer = issuer.issuer
-  profile.expectedIssuer = issuer.expectedIssuer
+  profile.issuer = issuer.issuer === null ? null : urlDisplay(issuer.issuer).text
+  profile.expectedIssuer = issuer.expectedIssuer === null ? null : urlDisplay(issuer.expectedIssuer).text
   profile.issuerMatches = issuer.matches
   counts.settings += issuer.settings
   if (issuer.incomplete) state.incomplete = true

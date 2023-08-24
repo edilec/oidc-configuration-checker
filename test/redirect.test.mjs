@@ -42,7 +42,8 @@ test('long redirect mismatch locates exact sources without exposing hidden query
   assert.equal(control.report.status, 'pass')
   assert.equal(control.report.profile.redirectUris[0].status, 'allowlisted')
   assert.equal(control.report.profile.redirectUris[0].pointer, '/redirectUris/0')
-  assert.equal(control.report.profile.redirectUris[0].truncated, true)
+  assert.equal(control.report.profile.redirectUris[0].truncated, false)
+  assert.equal(control.report.profile.redirectUris[0].redacted, true)
   assert.equal(Object.hasOwn(control.report.profile.redirectUris[0], 'rawSha256'), false)
   assert.equal(JSON.stringify(control.report).includes('RED'), false)
 
@@ -60,7 +61,8 @@ test('long redirect mismatch locates exact sources without exposing hidden query
     assert.equal(denied.evidence, 'Exact URL values differ beyond the displayed excerpt; client /redirectUris/0; policy /allowedRedirectUris/0')
     assert.equal(unused.evidence, 'Exact URL values differ beyond the displayed excerpt; policy /allowedRedirectUris/0; client /redirectUris/0')
     assert.equal(report.profile.redirectUris[0].pointer, '/redirectUris/0')
-    assert.equal(report.profile.redirectUris[0].truncated, true)
+    assert.equal(report.profile.redirectUris[0].truncated, false)
+    assert.equal(report.profile.redirectUris[0].redacted, true)
     const rendered = JSON.stringify(report)
     assert.equal(rendered.includes('rawSha256'), false)
     assert.equal(rendered.includes('RED'), false)
@@ -82,8 +84,10 @@ test('the profile URI truncation flag starts only beyond the 200-unit display bo
   assert.equal(exact.profile.redirectUris[0].uri, atBound)
   assert.equal(exact.profile.redirectUris[0].pointer, '/redirectUris/0')
   assert.equal(exact.profile.redirectUris[0].truncated, false)
+  assert.equal(exact.profile.redirectUris[0].redacted, false)
   assert.equal(truncated.profile.redirectUris[0].uri.endsWith('...'), true)
   assert.equal(truncated.profile.redirectUris[0].truncated, true)
+  assert.equal(truncated.profile.redirectUris[0].redacted, false)
   assert.equal(Object.hasOwn(truncated.profile.redirectUris[0], 'rawSha256'), false)
 })
 
@@ -241,7 +245,7 @@ test('post-logout URIs are compared against their own allowlist', async () => {
 
   assert.equal(findingsFor(report, 'redirect-uri-not-allowlisted')[0].location.pointer, '/postLogoutRedirectUris/0')
   assert.equal(report.summary.postLogoutUris, 1)
-  assert.deepEqual(report.profile.postLogoutUris, [{ uri: 'https://app.example.invalid/bye', pointer: '/postLogoutRedirectUris/0', truncated: false, status: 'not-allowlisted' }])
+  assert.deepEqual(report.profile.postLogoutUris, [{ uri: 'https://app.example.invalid/bye', pointer: '/postLogoutRedirectUris/0', truncated: false, redacted: false, status: 'not-allowlisted' }])
 })
 
 test('a client that registers no redirect URI at all is missing a required field', async () => {

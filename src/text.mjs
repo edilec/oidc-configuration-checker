@@ -1,0 +1,338 @@
+/**
+ * Decoding, sanitising, ordering, identifier shapes and URI shapes.
+ *
+ * Nothing in this module touches the filesystem, the network, the locale or a
+ * clock. Every value it handles arrived in a file this tool did not write --
+ * a discovery document somebody saved, a JWKS somebody exported -- so every
+ * value it returns is treated as data on its way to a report and never as
+ * something that may shape a line of output.
+ */
+
+/**
+ * Order by UTF-16 code unit.
+ *
+ * Locale-aware comparison -- the string method and the collator class alike --
+ * reads ICU data that differs between Node builds and between hosts, and it
+ * weighs case and punctuation differently from their code points. The values
+ * ordered in this package include algorithm names, and those are exactly where
+ * the two disagree: by code unit `EdDSA` follows `ES256` and `none` follows
+ * both, while an English collator puts `EdDSA` first and `none` in the middle.
+ * A collated report would therefore list a provider's offered algorithms in a
+ * different order on a different machine. Every order this package exposes is
+ * decided here.
+ *
+ * Neither spelling of the locale-aware comparison appears anywhere in this
+ * package, and `test/ordering.test.mjs` pins what the tool *emits* rather than
+ * what its source says -- a scan of the source cannot tell one comparator from
+ * the other, so a scan is not the test.
+ */
+export function byCodeUnit(left, right) {
+  if (left === right) return 0
+  return left < right ? -1 : 1
+}
+
+/**
+ * The characters no untrusted value may carry into output, in five classes.
+ *
+ * Built from code points rather than written literally: a literal U+2028 or
+ * U+2029 inside a module is a line terminator to the JavaScript parser, and the
+ * rest are invisible in an editor. Spelling each one out keeps this file plain
+ * ASCII and keeps the list reviewable.
+ *
+ * - **C0** (U+0000-U+001F) and **DEL** (U+007F). A newline forges a line in the
+ *   human report, ESC opens a terminal escape sequence, NUL truncates a value
+ *   in anything that receives it through C.
+ * - **C1** (U+0080-U+009F). Easy to forget once C0 is handled, and two of them
+ *   need no help: U+0085 NEL is a line break to a great many consumers, and
+ *   U+009B is the 8-bit CSI, a terminal control introducer that needs no ESC in
+ *   front of it.
+ * - **Line and paragraph separators** (U+2028, U+2029).
+ * - **Bidi and isolate controls** (U+200E, U+200F, U+202A-U+202E,
+ *   U+2066-U+2069). U+202E RIGHT-TO-LEFT OVERRIDE reverses everything printed
+ *   after it, so a key id or a redirect host can be displayed as something
+ *   other than the value that was compared. Ordinary right-to-left text --
+ *   Arabic, Hebrew -- needs none of these: the letters carry their own
+ *   direction, so refusing the overrides refuses nothing legitimate.
+ * - **Default-ignorable code points**, including U+034F COMBINING GRAPHEME
+ *   JOINER and U+FE0F VARIATION SELECTOR-16. They can alter the exact raw URI
+ *   identity while leaving a printed value visually unchanged.
+ */
+const DEL_AND_C1 = `${String.fromCharCode(0x7f)}-${String.fromCharCode(0x9f)}`
+const SEPARATORS = `${String.fromCharCode(0x2028)}${String.fromCharCode(0x2029)}`
+const BIDI =
+  `${String.fromCharCode(0x200e)}${String.fromCharCode(0x200f)}` +
+  `${String.fromCharCode(0x202a)}-${String.fromCharCode(0x202e)}` +
+  `${String.fromCharCode(0x2066)}-${String.fromCharCode(0x2069)}`
+
+/**
+ * Stripped from every untrusted string on its way into output -- key ids,
+ * client ids, algorithm names, redirect URIs, file names, pointers, messages,
+ * suggestions and evidence alike, not only an excerpt field. Tab, newline and
+ * carriage return are left out of this class deliberately: `excerpt` collapses
+ * them into a single space in the very next step, which is the same result by a
+ * shorter route.
+ */
+const CONTROL = new RegExp(
+  `[${String.fromCharCode(0)}-${String.fromCharCode(8)}` +
+  `${String.fromCharCode(11)}${String.fromCharCode(12)}` +
+  `${String.fromCharCode(14)}-${String.fromCharCode(31)}` +
+  `${DEL_AND_C1}${SEPARATORS}${BIDI}]|\\p{Default_Ignorable_Code_Point}`,
+  'gu',
+)
+
+/**
+ * What an identifier or a URI may not contain: the same five classes, plus the
+ * three ASCII whitespace controls `CONTROL` leaves to the collapse. A key id
+ * that prints differently from the value the rotation check compared is a key
+ * nobody can audit, so it is refused at the door rather than cleaned up.
+ */
+const FORBIDDEN = new RegExp(
+  `[${String.fromCharCode(0)}-${String.fromCharCode(31)}` +
+  `${DEL_AND_C1}${SEPARATORS}${BIDI}]|\\p{Default_Ignorable_Code_Point}`,
+  'u',
+)
+
+/**
+ * Detects any of the five classes anywhere in a string. Exported so tests can
+ * walk an entire serialised report and assert that nothing survived anywhere,
+ * rather than checking the one field a developer remembered to sanitise.
+ */
+export function hasForbiddenCharacter(value) {
+  return FORBIDDEN.test(String(value))
+}
+
+export const EXCERPT_LIMIT = 160
+export const MAX_IDENTIFIER_LENGTH = 120
+export const MAX_TOKEN_LENGTH = 64
+export const MAX_URI_LENGTH = 2048
+export const MAX_DESCRIPTION_LENGTH = 300
+export const MAX_BASE64URL_LENGTH = 1024
+
+/**
+ * A bounded, single-line, control-free rendering of an untrusted string.
+ *
+ * Every id, file name, pointer, message and piece of evidence that reaches a
+ * finding goes through here. A tool in this catalog sanitised its evidence
+ * carefully and left its identifiers raw, so a record id holding a newline
+ * printed two lines into the human report and invented a finding that was never
+ * emitted.
+ */
+export function excerpt(value, limit = EXCERPT_LIMIT) {
+  const flattened = String(value).replace(CONTROL, ' ').replace(/\s+/g, ' ').trim()
+  if (flattened.length <= limit) return flattened
+  return `${flattened.slice(0, limit)}...`
+}
+
+/**
+ * Display a URI without publishing query or fragment text. Comparisons still
+ * use the original string; this function is only for report fields. Splitting
+ * on the raw delimiters preserves private-use URI spellings and bare `?`/`#`.
+ * Space is reserved for the markers so a long path cannot hide the fact that
+ * information was redacted.
+ */
+export function urlDisplay(value, limit = EXCERPT_LIMIT) {
+  const raw = String(value)
+  const fragmentAt = raw.indexOf('#')
+  const questionAt = raw.indexOf('?')
+  const queryAt = questionAt >= 0 && (fragmentAt < 0 || questionAt < fragmentAt) ? questionAt : -1
+  const prefixEnd = queryAt >= 0 ? queryAt : fragmentAt >= 0 ? fragmentAt : raw.length
+  const markers = `${queryAt >= 0 ? '?[redacted-query]' : ''}${fragmentAt >= 0 ? '#[redacted-fragment]' : ''}`
+  const prefix = raw.slice(0, prefixEnd).replace(CONTROL, ' ').replace(/\s+/g, ' ').trim()
+  const available = Math.max(0, limit - markers.length)
+  const truncated = prefix.length > available
+  return {
+    text: `${truncated ? `${prefix.slice(0, available)}...` : prefix}${markers}`,
+    truncated,
+    redacted: markers !== '',
+  }
+}
+
+/**
+ * The identifier alphabet: key ids and client ids.
+ *
+ * Wide enough for the spellings real providers use -- a UUID, a base64url
+ * thumbprint, a dotted name, a date-stamped rotation label -- which means upper
+ * case, `-`, `_` and `=` all occur, which in turn is why ordering in this
+ * package is decided by code unit and pinned by what the tool emits.
+ */
+const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/+=~-]*$/
+
+export function isIdentifier(value) {
+  if (typeof value !== 'string') return false
+  if (value.length === 0 || value.length > MAX_IDENTIFIER_LENGTH) return false
+  if (FORBIDDEN.test(value)) return false
+  return IDENTIFIER.test(value)
+}
+
+/**
+ * The token alphabet: algorithm names (`RS256`, `EdDSA`), key types (`RSA`),
+ * curves (`P-256`, `secp256k1`), key uses (`sig`) and token endpoint
+ * authentication methods (`private_key_jwt`). Narrower than an identifier
+ * because every one of these is drawn from a registry, not chosen by a
+ * deployment.
+ */
+const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+export function isToken(value) {
+  if (typeof value !== 'string') return false
+  if (value.length === 0 || value.length > MAX_TOKEN_LENGTH) return false
+  if (FORBIDDEN.test(value)) return false
+  return TOKEN.test(value)
+}
+
+/**
+ * A `response_type` is one or more tokens separated by single spaces, and it is
+ * compared as an exact string.
+ *
+ * OpenID Connect treats the value as a set, so `"code id_token"` and
+ * `"id_token code"` request the same thing -- but a provider's
+ * `response_types_supported` list carries one spelling and providers match it
+ * literally. This tool compares strings and says so, which is why a differently
+ * ordered spelling is reported as not offered rather than quietly accepted:
+ * the report then matches what the provider will actually do.
+ */
+const RESPONSE_TYPE = /^[A-Za-z0-9._-]+(?: [A-Za-z0-9._-]+)*$/
+
+export function isResponseType(value) {
+  if (typeof value !== 'string') return false
+  if (value.length === 0 || value.length > MAX_IDENTIFIER_LENGTH) return false
+  if (FORBIDDEN.test(value)) return false
+  return RESPONSE_TYPE.test(value)
+}
+
+/**
+ * base64url, as JWK parameters are encoded.
+ *
+ * The charset is checked here rather than left to the decoder: `Buffer.from`
+ * with `base64url` silently drops anything outside the alphabet, so a parameter
+ * holding punctuation would decode to a shorter value and a modulus would be
+ * measured as smaller -- or larger -- than it is. A length of 1 mod 4 encodes no
+ * whole byte and is refused for the same reason. The input is bounded before
+ * the pattern runs; the pattern itself has no alternation and no nested
+ * quantifier, so its cost is linear in a length this module has already capped.
+ */
+const BASE64URL = /^[A-Za-z0-9_-]+$/
+
+export function isBase64Url(value) {
+  if (typeof value !== 'string') return false
+  if (value.length === 0 || value.length > MAX_BASE64URL_LENGTH) return false
+  if (value.length % 4 === 1) return false
+  return BASE64URL.test(value)
+}
+
+/**
+ * Say what a refused value was, without reproducing any of it.
+ *
+ * A rejected field is arbitrary content from a file this tool did not write,
+ * and the report goes to stdout -- a stream that is piped, logged and pasted
+ * somewhere more public than the input ever was. Echoing the value back hands
+ * that content a wider audience than it had, on exactly the fields whose
+ * validation exists to keep something unexpected out of the report. The pointer
+ * on the finding names the exact position in the file, which is all a reader
+ * needs; the value stays in the file, where it started.
+ *
+ * This matters more here than in most of the catalog: the files this tool reads
+ * sit next to the files that hold client secrets, and a private key parameter
+ * that reached the report would be published by the next CI job that archives
+ * it.
+ */
+export function describeValue(value) {
+  if (value === undefined) return 'nothing'
+  if (value === null) return 'null'
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (typeof value === 'number') return Number.isInteger(value) ? 'an integer' : 'a number'
+  if (typeof value === 'string') return `a string of ${value.length} character(s)`
+  if (Array.isArray(value)) return `an array of ${value.length} item(s)`
+  if (typeof value === 'object') return 'an object'
+  return `a ${typeof value}`
+}
+
+/** Said when nothing about the failure can be repeated without repeating the document. */
+const UNPARSEABLE = 'the document could not be parsed as JSON'
+
+/** Where V8 puts the offending offset. Safe: an offset says nothing about content. */
+const PARSE_POSITION = /at position \d+(?: \(line \d+ column \d+\))?/
+
+/**
+ * The spelling that quotes the document back.
+ *
+ * Recognised BEFORE the offset is looked for, and that order is the whole fix.
+ * A document whose own text reads `at position 1` produces
+ * `Unexpected token 'a', "at position 1" is not valid JSON`, so a helper that
+ * matches the offset first finds it INSIDE the quoted span and slices the
+ * document straight back out. The `s` flag matters for the same reason: the
+ * quoted span can contain a newline.
+ */
+const QUOTES_THE_INPUT = /^Unexpected token (.+?), (\.\.\.)?".*"(?:\.\.\.)? is not valid JSON$/s
+
+function describeParseFailure(message) {
+  const quoting = QUOTES_THE_INPUT.exec(message)
+  if (quoting !== null) {
+    const where = quoting[2] === undefined ? 'at the start of the document' : 'inside the document'
+    return `unexpected token ${quoting[1]} ${where}`
+  }
+  const position = PARSE_POSITION.exec(message)
+  if (position !== null) return message.slice(0, position.index + position[0].length)
+  if (message === 'Unexpected end of JSON input') return message
+  return UNPARSEABLE
+}
+
+/**
+ * Say why a document would not parse, without reproducing any of it.
+ *
+ * `describeValue` above is the rule for a refused value; this is the same rule
+ * for a refused document, and it exists because V8 breaks it for free. A parse
+ * failure is reported two ways, and one of them quotes the input:
+ * `Unexpected token 'A', "AKIAIOSFODNN7EXAMPLE" is not valid JSON`, or a
+ * ten-character window followed by `"..."`. A client document short enough to
+ * be only a secret is therefore reproduced in full by its own error message,
+ * on exactly the error path an untrusted or malformed file takes. `excerpt`
+ * does not help: it strips controls and cuts from the end, while the quoted
+ * copy carries no controls and sits at the front.
+ *
+ * The position, line and column say where parsing stopped without saying what
+ * was there, which is all a reader needs -- the document stays in the file,
+ * where it started. The quoting form carries no offset of its own, so that
+ * case names the offending token and whether the failure was reached at the
+ * start of the document or inside it, rather than inventing a location.
+ *
+ * The closing guard is deliberate belt and braces, and it is the reason this
+ * function is safe against wordings it has never seen: every V8 parse message
+ * that carries no quoted snippet also carries no double quote at all -- it
+ * quotes JSON punctuation with apostrophes. So a double quote surviving to the
+ * end means a snippet survived, whatever the branch logic above concluded, and
+ * the generic sentence is used instead. Callers still pass the result through
+ * `excerpt`, because the offending token is one character of untrusted input
+ * and may itself be a control.
+ */
+export function parseFailureDetail(error) {
+  const message = String(error?.message ?? '')
+  const detail = describeParseFailure(message)
+  return detail.includes('"') ? UNPARSEABLE : detail
+}
+
+/**
+ * Decode bytes as UTF-8, strictly.
+ *
+ * `fatal: true` is the whole point. Decoding leniently and then hunting for
+ * U+FFFD cannot tell undecodable bytes from a file that legitimately contains a
+ * replacement character, and that confusion has already let an unread input
+ * report a pass in this catalog. The decoder decides; the decoded text never
+ * gets a vote. Every file this tool opens goes through here -- the policy
+ * document included, because that is precisely where a sibling tool hardened
+ * its data path and forgot its own configuration.
+ */
+export function decodeUtf8(bytes) {
+  try {
+    return { ok: true, text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes) }
+  } catch {
+    return { ok: false, reason: 'not-utf8' }
+  }
+}
+
+/** True for a plain object -- not an array, not null, not a class instance dressed up as one. */
+export function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}

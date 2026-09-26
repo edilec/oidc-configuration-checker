@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1",
+  "description": "Storefront relying-party policy.",
+  "redirectUriMatching": "exact",
+  "allowedRedirectUris": [
+    "https://app.example.invalid/auth/callback",
+    "https://app.example.invalid/auth/*"
+  ],
+  "allowedPostLogoutRedirectUris": [
+    "https://app.example.invalid/signed-out"
+  ],
+  "allowedIdTokenSigningAlgs": [
+    "ES256",
+    "RS256"
+  ],
+  "allowedResponseTypes": [
+    "code"
+  ],
+  "allowedTokenEndpointAuthMethods": [
+    "private_key_jwt"
+  ],
+  "requirePkceS256": true,
+  "minimumKeys": 2,
+  "minRsaModulusBits": 2048
+}

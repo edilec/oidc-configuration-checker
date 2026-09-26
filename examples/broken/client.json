@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1",
+  "clientId": "storefront-web",
+  "description": "Public web front end for the storefront.",
+  "expectedIssuer": "https://id.example.invalid",
+  "redirectUris": [
+    "https://app.example.invalid/auth/callback",
+    "https://app.example.invalid/legacy/callback"
+  ],
+  "postLogoutRedirectUris": [
+    "https://app.example.invalid/signed-out"
+  ],
+  "responseTypes": [
+    "code"
+  ],
+  "idTokenSignedResponseAlg": "RS256",
+  "tokenEndpointAuthMethod": "private_key_jwt",
+  "pkceMethod": "S256"
+}
